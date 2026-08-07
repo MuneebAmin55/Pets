@@ -1,0 +1,19 @@
+.app-layout {
+  min-height: 100vh;
+}
+
+.app-main {
+  padding-top: var(--header-height);
+  min-height: 100vh;
+  transition: margin-left var(--transition-base);
+}
+
+.app-main.with-sidebar {
+  margin-left: var(--sidebar-width);
+}
+
+@media (max-width: 768px) {
+  .app-main.with-sidebar {
+    margin-left: 0;
+  }
+}

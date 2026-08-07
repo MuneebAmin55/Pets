@@ -1,0 +1,105 @@
+/* ===== PawPal Design Tokens ===== */
+:root {
+  /* Primary palette – warm coral/orange */
+  --color-primary-h: 18;
+  --color-primary-s: 90%;
+  --color-primary-l: 55%;
+  --color-primary: hsl(var(--color-primary-h), var(--color-primary-s), var(--color-primary-l));
+  --color-primary-light: hsl(var(--color-primary-h), var(--color-primary-s), 70%);
+  --color-primary-dark: hsl(var(--color-primary-h), var(--color-primary-s), 40%);
+
+  /* Accent – teal */
+  --color-accent-h: 170;
+  --color-accent-s: 65%;
+  --color-accent-l: 45%;
+  --color-accent: hsl(var(--color-accent-h), var(--color-accent-s), var(--color-accent-l));
+  --color-accent-light: hsl(var(--color-accent-h), var(--color-accent-s), 60%);
+
+  /* Neutrals */
+  --color-bg: #f8f9fc;
+  --color-surface: #ffffff;
+  --color-surface-hover: #f1f3f8;
+  --color-border: #e2e6ef;
+  --color-text: #1a1d26;
+  --color-text-secondary: #6b7280;
+  --color-text-muted: #9ca3af;
+
+  /* Semantic */
+  --color-success: hsl(145, 63%, 42%);
+  --color-warning: hsl(38, 92%, 50%);
+  --color-danger: hsl(0, 72%, 51%);
+  --color-info: hsl(210, 80%, 52%);
+
+  /* Shadows */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.12);
+  --shadow-glow: 0 0 20px hsla(var(--color-primary-h), var(--color-primary-s), var(--color-primary-l), 0.25);
+
+  /* Glass */
+  --glass-bg: rgba(255, 255, 255, 0.65);
+  --glass-border: rgba(255, 255, 255, 0.35);
+  --glass-blur: 14px;
+
+  /* Radius */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+  --radius-full: 9999px;
+
+  /* Spacing scale (4px base) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* Typography */
+  --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.875rem;
+  --font-size-base: 1rem;
+  --font-size-lg: 1.125rem;
+  --font-size-xl: 1.25rem;
+  --font-size-2xl: 1.5rem;
+  --font-size-3xl: 1.875rem;
+  --font-size-4xl: 2.25rem;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  --line-height: 1.6;
+
+  /* Transitions */
+  --transition-fast: 150ms ease;
+  --transition-base: 250ms ease;
+  --transition-slow: 400ms ease;
+
+  /* Sidebar */
+  --sidebar-width: 260px;
+  --header-height: 64px;
+}
+
+/* ===== Dark Mode ===== */
+[data-theme='dark'] {
+  --color-bg: #0f1119;
+  --color-surface: #1a1d2e;
+  --color-surface-hover: #252840;
+  --color-border: #2d3148;
+  --color-text: #eef0f6;
+  --color-text-secondary: #9ba1b5;
+  --color-text-muted: #6b7189;
+
+  --glass-bg: rgba(26, 29, 46, 0.7);
+  --glass-border: rgba(45, 49, 72, 0.5);
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.25);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
