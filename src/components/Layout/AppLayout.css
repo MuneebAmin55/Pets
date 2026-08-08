@@ -1,11 +1,12 @@
 .app-layout {
   min-height: 100vh;
+  background: var(--bg);
 }
 
 .app-main {
+  transition: margin-left var(--transition-base);
   padding-top: var(--header-height);
   min-height: 100vh;
-  transition: margin-left var(--transition-base);
 }
 
 .app-main.with-sidebar {
