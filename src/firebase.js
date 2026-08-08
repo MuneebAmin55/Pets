@@ -1,7 +1,6 @@
 import { getApp, getApps, initializeApp } from 'firebase/app'
 import { getAuth } from 'firebase/auth'
 import { getFirestore } from 'firebase/firestore'
-
 // Supports values copied from Firebase's JavaScript config object, such as
 // `apiKey: "AIza...",`, as well as plain Vite environment values.
 const cleanFirebaseValue = (value) => value?.trim().replace(/,$/, '').replace(/^["']|["']$/g, '').trim()

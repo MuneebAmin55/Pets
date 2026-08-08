@@ -462,7 +462,7 @@ function App() {
   return (
     <main className="pawpal-shell">
       <nav className="topbar">
-        <button className="brand" onClick={() => setActiveTab('Overview')} aria-label="PawPal home">
+        <button className="brand" onClick={() => { navigate('/'); setActiveTab('Overview') }} aria-label="PawPal home">
           <span className="brand-mark">🐾</span><span>PawPal</span>
         </button>
         <div className="nav-links">
@@ -475,7 +475,7 @@ function App() {
 
       <section className="welcome-row">
         <div><p className="eyebrow">YOUR PET CARE COMPANION</p><h1>{greeting}</h1><p className="welcome-copy">Here’s what’s happening with your furry family today.</p></div>
-        <div className="header-actions"><span className={`sync-status ${firebaseStatus.startsWith('Synced') ? 'synced' : ''}`}>{firebaseStatus}</span><button className="add-button" onClick={() => setModal('pet')}>+ Add a pet</button></div>
+        <div className="header-actions"><span className={`sync-status ${firebaseStatus.startsWith('Synced') ? 'synced' : ''}`}>{firebaseStatus}</span><button className="add-button" onClick={() => { setPetForm({ name: '', breed: '', age: '', species: 'Dog' }); setModal('pet') }}>+ Add a pet</button></div>
       </section>
 
       {notice && <div className="toast" role="status">{notice}<button onClick={() => setNotice('')} aria-label="Dismiss">×</button></div>}
