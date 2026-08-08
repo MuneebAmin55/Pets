@@ -1,8 +1,86 @@
 import { useEffect, useMemo, useState } from 'react'
-import { createUserWithEmailAndPassword, onAuthStateChanged, signInWithEmailAndPassword, signOut, updateProfile } from 'firebase/auth'
+import { createUserWithEmailAndPassword, onAuthStateChanged, sendPasswordResetEmail, signInWithEmailAndPassword, signOut, updateProfile } from 'firebase/auth'
 import { doc, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore'
+import { Routes, Route, useNavigate, useParams } from 'react-router-dom'
 import { auth, db, hasFirebaseConfig } from './firebase'
 import './App.css'
+
+function PetDetailPage({ pets, tasks, healthRecords, setSelectedPet, setModal, setPetForm, setReminderForm }) {
+  const navigate = useNavigate()
+  const { petKey } = useParams()
+  const activePet = pets.find((pet) => (pet.id || pet.name) === petKey)
+
+  useEffect(() => {
+    if (activePet) {
+      setSelectedPet(activePet.name)
+    }
+  }, [activePet, setSelectedPet])
+
+  if (!activePet) {
+    return (
+      <section className="empty-page">
+        <p className="eyebrow">Pet not found</p>
+        <h2>We couldn't find that pet.</h2>
+        <button className="add-button" onClick={() => navigate('/')}>Back home</button>
+      </section>
+    )
+  }
+
+  const activePetTasks = tasks.filter((task) => task.pet === activePet.name)
+  const petKeyValue = activePet.id || activePet.name
+  const activePetRecords = [...(healthRecords[petKeyValue] || [])].sort((a, b) => new Date(b.date) - new Date(a.date))
+
+  return (
+    <section className="pet-detail-page">
+      <button className="back-button" onClick={() => navigate('/')}>← Back to my pets</button>
+      <div className="pet-detail-hero" style={{ '--pet-color': activePet.color }}>
+        <span className="detail-art">{activePet.icon}</span>
+        <div><p className="eyebrow">PET PROFILE</p><h2>{activePet.name}</h2><p>{activePet.breed} · {activePet.age}</p><span className="health-pill">● {activePet.status}</span></div>
+        <div className="pet-actions"><button className="edit-button" onClick={() => { setPetForm({ name: activePet.name, breed: activePet.breed, age: activePet.age, species: activePet.icon === '🐈' ? 'Cat' : 'Dog' }); setModal('edit-pet') }}>Edit pet</button><button className="delete-button" onClick={() => navigate('/')}>Delete</button><button className="add-button" onClick={() => { setReminderForm({ title: '', pet: activePet.name, due: '', type: '💊' }); setModal('reminder') }}>+ Add reminder</button></div>
+      </div>
+      <div className="detail-grid">
+        <div className="detail-card"><p className="eyebrow">ABOUT {activePet.name.toUpperCase()}</p><h3>Pet details</h3><p>{activePet.status}</p></div>
+        <div className="detail-card"><p className="eyebrow">CARE AT A GLANCE</p><h3>Upcoming reminders</h3>{activePetTasks.length ? <ul className="detail-task-list">{activePetTasks.map((task) => <li key={task.id}><span>{task.icon}</span><div><strong>{task.title}</strong><small>{task.due}</small></div></li>)}</ul> : <p>No upcoming reminders for {activePet.name}.</p>}</div>
+      </div>
+      <div className="detail-card health-records-card">
+        <div className="record-heading"><div><p className="eyebrow">DIGITAL HEALTH RECORDS</p><h3>{activePet.name}'s health records</h3></div><button className="text-button" onClick={() => setModal('record')}>+ Add record</button></div>
+        {activePetRecords.length ? <div className="health-record-list">{activePetRecords.map((record) => <button key={record.id} className="health-record" onClick={() => navigate(`/pets/${petKeyValue}/records/${record.id}`)}><span className={`record-icon ${record.type.toLowerCase().replace(' ', '-')}`}>{record.type === 'Vaccination' ? '💉' : record.type === 'Vet Visit' ? '🩺' : '💊'}</span><div><time>{new Date(`${record.date}T00:00:00`).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}</time><strong>{record.type}</strong><h4>{record.title}</h4>{record.description && <p>{record.description}</p>}{(record.veterinarian || record.nextDueDate) && <div className="record-meta">{record.veterinarian && <span>🩺 {record.veterinarian}</span>}{record.nextDueDate && <span>Next due: {new Date(`${record.nextDueDate}T00:00:00`).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}</span>}</div>}</div><span className="record-arrow">→</span></button>)}</div> : <div className="health-empty"><span>📋</span><p>No health records yet. Add vaccinations, vet visits, or medications to keep {activePet.name}'s history in one place.</p></div>}
+      </div>
+    </section>
+  )
+}
+
+function HealthRecordDetailPage({ pets, healthRecords, setModal, setRecordForm, setSelectedHealthRecord }) {
+  const navigate = useNavigate()
+  const { petKey, recordId } = useParams()
+  const activePet = pets.find((pet) => (pet.id || pet.name) === petKey)
+  const activeRecord = activePet ? (healthRecords[petKey] || []).find((record) => record.id === recordId) : null
+
+  if (!activePet || !activeRecord) {
+    return (
+      <section className="empty-page">
+        <p className="eyebrow">Record not found</p>
+        <h2>We couldn't find that health record.</h2>
+        <button className="add-button" onClick={() => navigate('/')}>Back home</button>
+      </section>
+    )
+  }
+
+  useEffect(() => {
+    setSelectedHealthRecord(activeRecord)
+  }, [activeRecord, setSelectedHealthRecord])
+
+  const petKeyValue = activePet.id || activePet.name
+
+  return (
+    <section className="health-record-detail">
+      <button className="back-button" onClick={() => navigate(`/pets/${petKeyValue}`)}>← Back to health records</button>
+      <div className="record-detail-heading"><span className={`record-icon ${activeRecord.type.toLowerCase().replace(' ', '-')}`}>{activeRecord.type === 'Vaccination' ? '💉' : activeRecord.type === 'Vet Visit' ? '🩺' : '💊'}</span><div><p className="eyebrow">DIGITAL HEALTH RECORD</p><h3>{activeRecord.title}</h3><p>{activeRecord.type}</p></div><div className="record-actions"><button className="edit-button" onClick={() => { setSelectedHealthRecord(activeRecord); setRecordForm({ date: activeRecord.date, type: activeRecord.type, title: activeRecord.title, description: activeRecord.description || '', veterinarian: activeRecord.veterinarian || '', nextDueDate: activeRecord.nextDueDate || '' }); setModal('edit-record') }}>Edit</button><button className="delete-button" onClick={() => navigate(`/pets/${petKeyValue}`)}>Delete</button></div></div>
+      <div className="record-detail-grid"><div><span>Date</span><strong>{new Date(`${activeRecord.date}T00:00:00`).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</strong></div><div><span>Veterinarian</span><strong>{activeRecord.veterinarian || 'Not specified'}</strong></div><div><span>Next due date</span><strong>{activeRecord.nextDueDate ? new Date(`${activeRecord.nextDueDate}T00:00:00`).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) : 'Not specified'}</strong></div></div>
+      <div className="record-detail-notes"><span>Description</span><p>{activeRecord.description || 'No additional description was added for this record.'}</p></div>
+    </section>
+  )
+}
 
 const defaultPets = [
   { name: 'Buddy', breed: 'Golden Retriever', age: '3 years', icon: '🐕', color: '#f9c66a', status: 'Happy & healthy' },
@@ -22,7 +100,7 @@ function App() {
   const [tasks, setTasks] = useState([])
   const [healthRecords, setHealthRecords] = useState({})
   const [selectedPet, setSelectedPet] = useState('Buddy')
-  const [showPetDetails, setShowPetDetails] = useState(false)
+  const [completedCount, setCompletedCount] = useState(0)
   const [notice, setNotice] = useState('')
   const [firebaseStatus, setFirebaseStatus] = useState(hasFirebaseConfig ? 'Connecting your PawPal account…' : 'Demo mode')
   const [modal, setModal] = useState(null)
@@ -36,6 +114,7 @@ function App() {
   const [authUser, setAuthUser] = useState(null)
   const [authError, setAuthError] = useState('')
   const [authBusy, setAuthBusy] = useState(false)
+  const navigate = useNavigate()
 
   const completed = 0
   const firstName = useMemo(() => {
@@ -44,13 +123,14 @@ function App() {
   }, [authUser])
   const greeting = useMemo(() => selectedPet === 'Buddy' ? `Good morning${firstName ? `, ${firstName}` : ''}!` : `${selectedPet} is looking great!`, [firstName, selectedPet])
 
-  const persistDashboard = async (nextPets, nextTasks, nextHealthRecords = healthRecords) => {
+  const persistDashboard = async (nextPets, nextTasks, nextHealthRecords = healthRecords, nextCompletedCount = completedCount) => {
     if (hasFirebaseConfig && auth?.currentUser && db) {
       const user = auth.currentUser
       await setDoc(doc(db, 'pawpalDashboards', user.uid), {
         pets: nextPets,
         tasks: nextTasks,
         healthRecords: nextHealthRecords,
+        completedCount: nextCompletedCount,
         profile: {
           displayName: user.displayName || '',
           email: user.isAnonymous ? '' : user.email || '',
@@ -89,18 +169,6 @@ function App() {
     data.pets.every((pet, index) => pet.name === defaultPets[index].name) &&
     data.tasks.every((task, index) => task.title === defaultTasks[index].title)
 
-  const openPetDetails = (pet) => {
-    setSelectedPet(pet.name)
-    setSelectedHealthRecord(null)
-    setShowPetDetails(true)
-    window.setTimeout(() => document.getElementById('pet-detail')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0)
-  }
-
-  const openHealthRecord = (record) => {
-    setSelectedHealthRecord(record)
-    window.setTimeout(() => document.getElementById('health-record-detail')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0)
-  }
-
   useEffect(() => {
     if (!hasFirebaseConfig || !auth || !db) {
       setPets([])
@@ -132,11 +200,13 @@ function App() {
             if (isStarterDashboard(data)) {
               setPets([])
               setTasks([])
-              await persistDashboard([], [], {})
+              setCompletedCount(0)
+              await persistDashboard([], [], {}, 0)
             } else {
               if (Array.isArray(data.pets)) setPets(data.pets)
               if (Array.isArray(data.tasks)) setTasks(data.tasks)
               setHealthRecords(data.healthRecords && typeof data.healthRecords === 'object' ? data.healthRecords : {})
+              setCompletedCount(typeof data.completedCount === 'number' ? data.completedCount : 0)
             }
           } else {
             try {
@@ -174,7 +244,7 @@ function App() {
   const submitAuth = async (event) => {
     event.preventDefault()
     if (!auth) {
-      setAuthError('Add your Firebase configuration in .env.local before signing in.')
+      setAuthError('Add your Firebase configuration in .env.local before using authentication.')
       return
     }
     setAuthBusy(true)
@@ -184,21 +254,27 @@ function App() {
         const credential = await createUserWithEmailAndPassword(auth, authForm.email, authForm.password)
         if (authForm.name.trim()) await updateProfile(credential.user, { displayName: authForm.name.trim() })
         await persistDashboard([], [], {})
+        setNotice('Your PawPal account is ready.')
+      } else if (authMode === 'reset') {
+        await sendPasswordResetEmail(auth, authForm.email)
+        setNotice('Check your inbox for a password reset link.')
       } else {
         await signInWithEmailAndPassword(auth, authForm.email, authForm.password)
+        setNotice('Welcome back to PawPal!')
       }
       setAuthForm({ name: '', email: '', password: '' })
       setAuthModal(false)
-      setNotice(authMode === 'signup' ? 'Your PawPal account is ready.' : 'Welcome back to PawPal!')
     } catch (error) {
       const messages = {
         'auth/email-already-in-use': 'An account already exists for this email.',
         'auth/invalid-credential': 'Email or password is incorrect.',
         'auth/weak-password': 'Use a password with at least 6 characters.',
         'auth/invalid-email': 'Enter a valid email address.',
+        'auth/user-not-found': 'No account was found for that email.',
+        'auth/missing-email': 'Please provide an email address to reset your password.',
         'auth/operation-not-allowed': 'Enable Email/Password sign-in in Firebase Authentication.',
       }
-      setAuthError(messages[error.code] || 'Could not complete sign-in. Please try again.')
+      setAuthError(messages[error.code] || 'Could not complete authentication. Please try again.')
     } finally {
       setAuthBusy(false)
     }
@@ -213,12 +289,14 @@ function App() {
   const completeTask = async (id) => {
     const task = tasks.find((item) => item.id === id)
     const updatedTasks = tasks.filter((item) => item.id !== id)
+    const nextCompleted = completedCount + 1
     setTasks(updatedTasks)
+    setCompletedCount(nextCompleted)
     setNotice(`${task.title} marked as complete.`)
 
     if (hasFirebaseConfig && auth?.currentUser && db) {
       try {
-        await persistDashboard(pets, updatedTasks, healthRecords)
+        await persistDashboard(pets, updatedTasks, healthRecords, nextCompleted)
       } catch (error) {
         setNotice(firebaseErrorMessage(error, `${task.title} completion`))
       }
@@ -280,7 +358,7 @@ function App() {
     setTasks(updatedTasks)
     setHealthRecords(updatedRecords)
     setSelectedPet(updatedPets[0]?.name || '')
-    setShowPetDetails(false)
+    navigate('/')
     setNotice(`${petName} and their records were deleted.`)
     try { await persistDashboard(updatedPets, updatedTasks, updatedRecords) } catch (error) { setNotice(firebaseErrorMessage(error, `${petName}'s deletion`)) }
   }
@@ -364,15 +442,17 @@ function App() {
         <section className="signed-out">
           <span>🐾</span><p className="eyebrow">YOUR PRIVATE PET CARE SPACE</p><h1>Every pet has a home here.</h1><p>Log in to view and manage the pets, reminders, and care details saved only to your account.</p><div><button className="add-button" onClick={() => openAuth('signup')}>Create an account</button><button className="secondary-cta" onClick={() => openAuth('login')}>Log in</button></div>
         </section>
+        {notice && <div className="toast" role="status">{notice}<button onClick={() => setNotice('')} aria-label="Dismiss">×</button></div>}
         {authModal && <div className="modal-backdrop" role="presentation" onMouseDown={() => setAuthModal(false)}>
           <form className="modal-card auth-card" onSubmit={submitAuth} onMouseDown={(event) => event.stopPropagation()}>
-            <div className="modal-heading"><div><p className="eyebrow">WELCOME TO PAWPAL</p><h2>{authMode === 'login' ? 'Log in' : 'Create your account'}</h2></div><button type="button" className="close-button" onClick={() => setAuthModal(false)} aria-label="Close">×</button></div>
+            <div className="modal-heading"><div><p className="eyebrow">WELCOME TO PAWPAL</p><h2>{authMode === 'login' ? 'Log in' : authMode === 'signup' ? 'Create your account' : 'Reset password'}</h2></div><button type="button" className="close-button" onClick={() => setAuthModal(false)} aria-label="Close">×</button></div>
             {authMode === 'signup' && <label>Your name<input required value={authForm.name} onChange={(event) => setAuthForm({ ...authForm, name: event.target.value })} placeholder="e.g. Sarah Mitchell" /></label>}
             <label>Email<input required type="email" value={authForm.email} onChange={(event) => setAuthForm({ ...authForm, email: event.target.value })} placeholder="you@example.com" /></label>
-            <label>Password<input required minLength="6" type="password" value={authForm.password} onChange={(event) => setAuthForm({ ...authForm, password: event.target.value })} placeholder="At least 6 characters" /></label>
+            {(authMode === 'login' || authMode === 'signup') && <label>Password<input required minLength="6" type="password" value={authForm.password} onChange={(event) => setAuthForm({ ...authForm, password: event.target.value })} placeholder="At least 6 characters" /></label>}
             {authError && <p className="auth-error" role="alert">{authError}</p>}
-            <button className="add-button auth-submit" type="submit" disabled={authBusy}>{authBusy ? 'Please wait…' : authMode === 'login' ? 'Log in' : 'Create account'}</button>
-            <p className="auth-switch">{authMode === 'login' ? 'New to PawPal?' : 'Already have an account?'} <button type="button" onClick={() => { setAuthMode(authMode === 'login' ? 'signup' : 'login'); setAuthError('') }}>{authMode === 'login' ? 'Sign up' : 'Log in'}</button></p>
+            <button className="add-button auth-submit" type="submit" disabled={authBusy}>{authBusy ? 'Please wait…' : authMode === 'login' ? 'Log in' : authMode === 'reset' ? 'Send reset link' : 'Create account'}</button>
+            <p className="auth-switch">{authMode === 'login' ? 'New to PawPal?' : authMode === 'signup' ? 'Already have an account?' : 'Remembered your password?'} <button type="button" onClick={() => { setAuthMode(authMode === 'login' ? 'signup' : authMode === 'signup' ? 'reset' : 'login'); setAuthError('') }}>{authMode === 'login' ? 'Sign up' : authMode === 'signup' ? 'Reset password' : 'Log in'}</button></p>
+            {authMode === 'login' && <p className="auth-footer"><button type="button" className="link-button" onClick={() => { setAuthMode('reset'); setAuthError('') }}>Forgot password?</button></p>}
           </form>
         </div>}
       </main>
@@ -400,54 +480,42 @@ function App() {
 
       {notice && <div className="toast" role="status">{notice}<button onClick={() => setNotice('')} aria-label="Dismiss">×</button></div>}
 
-      <section className="summary-grid" aria-label="Pet care summary">
-        <div className="summary-card"><span className="summary-icon peach">🐾</span><div><strong>{pets.length}</strong><span>Pets in your family</span></div></div>
-        <div className="summary-card"><span className="summary-icon lavender">📅</span><div><strong>{tasks.length}</strong><span>Upcoming reminders</span></div></div>
-        <div className="summary-card"><span className="summary-icon mint">✓</span><div><strong>{completed}</strong><span>Tasks completed</span></div></div>
-      </section>
+      <Routes>
+        <Route path="/" element={
+          <>
+            <section className="summary-grid" aria-label="Pet care summary">
+              <div className="summary-card"><span className="summary-icon peach">🐾</span><div><strong>{pets.length}</strong><span>Pets in your family</span></div></div>
+              <div className="summary-card"><span className="summary-icon lavender">📅</span><div><strong>{tasks.length}</strong><span>Upcoming reminders</span></div></div>
+              <div className="summary-card"><span className="summary-icon mint">✓</span><div><strong>{completedCount}</strong><span>Tasks completed</span></div></div>
+            </section>
 
-      <section className="content-grid">
-        <div className="panel pets-panel" id="my-pets">
-          <div className="panel-heading"><div><p className="eyebrow">YOUR COMPANIONS</p><h2>My pets</h2></div><button className="text-button" onClick={() => openSection('my-pets')}>View all <span>→</span></button></div>
-          <div className="pet-grid">
-            {pets.map((pet) => <button className={`pet-card ${selectedPet === pet.name ? 'selected' : ''}`} key={pet.name} onClick={() => openPetDetails(pet)}>
-              <span className="pet-art" style={{ background: pet.color }}>{pet.icon}</span><span className="pet-info"><strong>{pet.name}</strong><small>{pet.breed} · {pet.age}</small><em>{pet.status}</em></span><span className="arrow">→</span>
-            </button>)}
-          </div>
-        </div>
-        <aside className="panel task-panel" id="calendar">
-          <div className="panel-heading"><div><p className="eyebrow">STAY ON TRACK</p><h2>Upcoming care</h2></div><button className="text-button" onClick={() => openSection('calendar')}>Calendar <span>→</span></button></div>
-          <div className="tasks">
-            {tasks.length ? tasks.map((task) => <div className="task" key={task.id}><span className={`task-icon ${task.tone}`}>{task.icon}</span><div><strong>{task.title}</strong><small>{task.pet} · <b>{task.due}</b></small></div><button className="done-button" onClick={() => completeTask(task.id)} aria-label={`Complete ${task.title}`}>✓</button></div>) : <p className="empty">All caught up — nice work!</p>}
-          </div>
-          <button className="reminder-button" onClick={() => { setReminderForm((current) => ({ ...current, pet: pets[0]?.name || '' })); setModal('reminder') }}>+ Add reminder</button>
-        </aside>
-      </section>
-
-      {showPetDetails && activePet && <section className="pet-detail-page" id="pet-detail">
-        <button className="back-button" onClick={() => { setShowPetDetails(false); openSection('my-pets') }}>← Back to my pets</button>
-        <div className="pet-detail-hero" style={{ '--pet-color': activePet.color }}>
-          <span className="detail-art">{activePet.icon}</span>
-          <div><p className="eyebrow">PET PROFILE</p><h2>{activePet.name}</h2><p>{activePet.breed} · {activePet.age}</p><span className="health-pill">● {activePet.status}</span></div>
-          <div className="pet-actions"><button className="edit-button" onClick={() => { setPetForm({ name: activePet.name, breed: activePet.breed, age: activePet.age, species: activePet.icon === '🐈' ? 'Cat' : 'Dog' }); setModal('edit-pet') }}>Edit pet</button><button className="delete-button" onClick={deletePet}>Delete</button><button className="add-button" onClick={() => { setReminderForm({ title: '', pet: activePet.name, due: '', type: '💊' }); setModal('reminder') }}>+ Add reminder</button></div>
-        </div>
-        <div className="detail-grid">
-          <div className="detail-card"><p className="eyebrow">ABOUT {activePet.name.toUpperCase()}</p><h3>Pet details</h3><p>{activePet.status}</p></div>
-          <div className="detail-card"><p className="eyebrow">CARE AT A GLANCE</p><h3>Upcoming reminders</h3>{activePetTasks.length ? <ul className="detail-task-list">{activePetTasks.map((task) => <li key={task.id}><span>{task.icon}</span><div><strong>{task.title}</strong><small>{task.due}</small></div></li>)}</ul> : <p>No upcoming reminders for {activePet.name}.</p>}</div>
-        </div>
-        <div className="detail-card health-records-card">
-          <div className="record-heading"><div><p className="eyebrow">DIGITAL HEALTH RECORDS</p><h3>{activePet.name}'s health records</h3></div><button className="text-button" onClick={() => setModal('record')}>+ Add record</button></div>
-          {activePetRecords.length ? <div className="health-record-list">{activePetRecords.map((record) => <button key={record.id} className="health-record" onClick={() => openHealthRecord(record)}><span className={`record-icon ${record.type.toLowerCase().replace(' ', '-')}`}>{record.type === 'Vaccination' ? '💉' : record.type === 'Vet Visit' ? '🩺' : '💊'}</span><div><time>{new Date(`${record.date}T00:00:00`).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}</time><strong>{record.type}</strong><h4>{record.title}</h4>{record.description && <p>{record.description}</p>}{(record.veterinarian || record.nextDueDate) && <div className="record-meta">{record.veterinarian && <span>🩺 {record.veterinarian}</span>}{record.nextDueDate && <span>Next due: {new Date(`${record.nextDueDate}T00:00:00`).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}</span>}</div>}</div><span className="record-arrow">→</span></button>)}</div> : <div className="health-empty"><span>📋</span><p>No health records yet. Add vaccinations, vet visits, or medications to keep {activePet.name}'s history in one place.</p></div>}
-        </div>
-        {selectedHealthRecord && <section className="health-record-detail" id="health-record-detail">
-          <button className="back-button" onClick={() => { setSelectedHealthRecord(null); document.querySelector('.health-records-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}>← Back to health records</button>
-          <div className="record-detail-heading"><span className={`record-icon ${selectedHealthRecord.type.toLowerCase().replace(' ', '-')}`}>{selectedHealthRecord.type === 'Vaccination' ? '💉' : selectedHealthRecord.type === 'Vet Visit' ? '🩺' : '💊'}</span><div><p className="eyebrow">DIGITAL HEALTH RECORD</p><h3>{selectedHealthRecord.title}</h3><p>{selectedHealthRecord.type}</p></div><div className="record-actions"><button className="edit-button" onClick={() => { setRecordForm({ date: selectedHealthRecord.date, type: selectedHealthRecord.type, title: selectedHealthRecord.title, description: selectedHealthRecord.description || '', veterinarian: selectedHealthRecord.veterinarian || '', nextDueDate: selectedHealthRecord.nextDueDate || '' }); setModal('edit-record') }}>Edit</button><button className="delete-button" onClick={deleteHealthRecord}>Delete</button></div></div>
-          <div className="record-detail-grid"><div><span>Date</span><strong>{new Date(`${selectedHealthRecord.date}T00:00:00`).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</strong></div><div><span>Veterinarian</span><strong>{selectedHealthRecord.veterinarian || 'Not specified'}</strong></div><div><span>Next due date</span><strong>{selectedHealthRecord.nextDueDate ? new Date(`${selectedHealthRecord.nextDueDate}T00:00:00`).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) : 'Not specified'}</strong></div></div>
-          <div className="record-detail-notes"><span>Description</span><p>{selectedHealthRecord.description || 'No additional description was added for this record.'}</p></div>
-        </section>}
-      </section>}
-
-      <section className="tip-card"><span>💡</span><div><p className="eyebrow">PAWPAL TIP</p><h3>A little consistency goes a long way.</h3><p>Keep health records and reminders together so every member of the family can give the best care.</p></div><button onClick={() => setNotice('Health records opened.')}>View health records →</button></section>
+            <section className="content-grid">
+              <div className="panel pets-panel" id="my-pets">
+                <div className="panel-heading"><div><p className="eyebrow">YOUR COMPANIONS</p><h2>My pets</h2></div><button className="text-button" onClick={() => openSection('my-pets')}>View all <span>→</span></button></div>
+                <div className="pet-grid">
+                  {pets.map((pet) => <button className={`pet-card ${selectedPet === pet.name ? 'selected' : ''}`} key={pet.name} onClick={() => navigate(`/pets/${pet.id || pet.name}`)}>
+                    <span className="pet-art" style={{ background: pet.color }}>{pet.icon}</span><span className="pet-info"><strong>{pet.name}</strong><small>{pet.breed} · {pet.age}</small><em>{pet.status}</em></span><span className="arrow">→</span>
+                  </button>)}
+                </div>
+              </div>
+              <aside className="panel task-panel" id="calendar">
+                <div className="panel-heading"><div><p className="eyebrow">STAY ON TRACK</p><h2>Upcoming care</h2></div><button className="text-button" onClick={() => openSection('calendar')}>Calendar <span>→</span></button></div>
+                <div className="tasks">
+                  {tasks.length ? tasks.map((task) => <div className="task" key={task.id}><span className={`task-icon ${task.tone}`}>{task.icon}</span><div><strong>{task.title}</strong><small>{task.pet} · <b>{task.due}</b></small></div><button className="done-button" onClick={() => completeTask(task.id)} aria-label={`Complete ${task.title}`}>✓</button></div>) : <p className="empty">All caught up — nice work!</p>}
+                </div>
+                <button className="reminder-button" onClick={() => { setReminderForm((current) => ({ ...current, pet: pets[0]?.name || '' })); setModal('reminder') }}>+ Add reminder</button>
+              </aside>
+            </section>
+            <section className="tip-card"><span>💡</span><div><p className="eyebrow">PAWPAL TIP</p><h3>A little consistency goes a long way.</h3><p>Keep health records and reminders together so every member of the family can give the best care.</p></div><button onClick={() => setNotice('Health records opened.')}>View health records →</button></section>
+          </>
+        } />
+        <Route path="/pets/:petKey" element={
+          <PetDetailPage pets={pets} tasks={tasks} healthRecords={healthRecords} setSelectedPet={setSelectedPet} setModal={setModal} setPetForm={setPetForm} setReminderForm={setReminderForm} />
+        } />
+        <Route path="/pets/:petKey/records/:recordId" element={
+          <HealthRecordDetailPage pets={pets} healthRecords={healthRecords} setModal={setModal} setRecordForm={setRecordForm} setSelectedHealthRecord={setSelectedHealthRecord} />
+        } />
+      </Routes>
 
       {modal && <div className="modal-backdrop" role="presentation" onMouseDown={() => setModal(null)}>
         <form className="modal-card" onSubmit={modal === 'pet' ? addPet : modal === 'edit-pet' ? editPet : modal === 'reminder' ? addReminder : modal === 'edit-record' ? editHealthRecord : addHealthRecord} onMouseDown={(event) => event.stopPropagation()}>
@@ -476,13 +544,22 @@ function App() {
 
       {authModal && <div className="modal-backdrop" role="presentation" onMouseDown={() => setAuthModal(false)}>
         <form className="modal-card auth-card" onSubmit={submitAuth} onMouseDown={(event) => event.stopPropagation()}>
-          <div className="modal-heading"><div><p className="eyebrow">WELCOME TO PAWPAL</p><h2>{authMode === 'login' ? 'Log in' : 'Create your account'}</h2></div><button type="button" className="close-button" onClick={() => setAuthModal(false)} aria-label="Close">×</button></div>
+          <div className="modal-heading"><div><p className="eyebrow">WELCOME TO PAWPAL</p><h2>{authMode === 'login' ? 'Log in' : authMode === 'signup' ? 'Create your account' : 'Reset password'}</h2></div><button type="button" className="close-button" onClick={() => setAuthModal(false)} aria-label="Close">×</button></div>
           {authMode === 'signup' && <label>Your name<input required value={authForm.name} onChange={(event) => setAuthForm({ ...authForm, name: event.target.value })} placeholder="e.g. Sarah Mitchell" /></label>}
           <label>Email<input required type="email" value={authForm.email} onChange={(event) => setAuthForm({ ...authForm, email: event.target.value })} placeholder="you@example.com" /></label>
-          <label>Password<input required minLength="6" type="password" value={authForm.password} onChange={(event) => setAuthForm({ ...authForm, password: event.target.value })} placeholder="At least 6 characters" /></label>
+          {(authMode === 'login' || authMode === 'signup') && <label>Password<input required minLength="6" type="password" value={authForm.password} onChange={(event) => setAuthForm({ ...authForm, password: event.target.value })} placeholder="At least 6 characters" /></label>}
           {authError && <p className="auth-error" role="alert">{authError}</p>}
-          <button className="add-button auth-submit" type="submit" disabled={authBusy}>{authBusy ? 'Please wait…' : authMode === 'login' ? 'Log in' : 'Create account'}</button>
-          <p className="auth-switch">{authMode === 'login' ? 'New to PawPal?' : 'Already have an account?'} <button type="button" onClick={() => { setAuthMode(authMode === 'login' ? 'signup' : 'login'); setAuthError('') }}>{authMode === 'login' ? 'Sign up' : 'Log in'}</button></p>
+          <button className="add-button auth-submit" type="submit" disabled={authBusy}>{authBusy ? 'Please wait…' : authMode === 'login' ? 'Log in' : authMode === 'reset' ? 'Send reset link' : 'Create account'}</button>
+          <p className="auth-switch">
+            {authMode === 'login' ? 'New to PawPal?' : authMode === 'signup' ? 'Already have an account?' : 'Remembered your password?'}
+            <button type="button" onClick={() => {
+              setAuthMode(authMode === 'login' ? 'signup' : authMode === 'signup' ? 'reset' : 'login')
+              setAuthError('')
+            }}>
+              {authMode === 'login' ? 'Sign up' : authMode === 'signup' ? 'Reset password' : 'Log in'}
+            </button>
+          </p>
+          {authMode === 'login' && <p className="auth-footer"><button type="button" className="link-button" onClick={() => { setAuthMode('reset'); setAuthError('') }}>Forgot password?</button></p>}
         </form>
       </div>}
     </main>

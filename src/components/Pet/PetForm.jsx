@@ -9,11 +9,11 @@ const emptyPet = {
   age: '',
   gender: 'Male',
   weight: '',
-  weightUnit: 'kg',
+  weightUnit: 'kg',  
   color: '',
   microchipId: '',
   dateOfBirth: '',
-  allergies: [],
+  allergies: [],  
   medications: [],
   veterinarian: { name: '', clinic: '', phone: '', email: '', address: '' },
 };
@@ -63,6 +63,7 @@ export default function PetForm({ pet, onSubmit, onCancel }) {
           <h2>{isEdit ? 'Edit Pet' : 'Add New Pet'}</h2>
           <button className="modal-close" onClick={onCancel} aria-label="Close">✕</button>
         </div>
+        //
         <form onSubmit={handleSubmit}>
           <div className="modal-body">
             <div className="form-grid">
