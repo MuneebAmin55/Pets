@@ -3,9 +3,64 @@ import { createUserWithEmailAndPassword, onAuthStateChanged, sendPasswordResetEm
 import { doc, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore'
 import { Routes, Route, useNavigate, useParams } from 'react-router-dom'
 import { auth, db, hasFirebaseConfig } from './firebase'
+import HealthTimeline from './components/Health/HealthTimeline'
 import './App.css'
 
-function PetDetailPage({ pets, tasks, healthRecords, setSelectedPet, setModal, setPetForm, setReminderForm }) {
+const createEmptyPetForm = () => ({
+  name: '',
+  species: 'Dog',
+  breed: '',
+  age: '',
+  gender: 'Male',
+  weight: '',
+  weightUnit: 'kg',
+  color: '',
+  microchipId: '',
+  dateOfBirth: '',
+  allergies: [],
+  medications: [],
+  veterinarian: { name: '', clinic: '', phone: '', email: '', address: '' },
+})
+
+const createEmptyReminderForm = () => ({ title: '', pet: 'Buddy', due: '', type: '💊' })
+const createEmptyRecordForm = () => ({ date: '', type: 'Vaccination', title: '', description: '', veterinarian: '', nextDueDate: '' })
+
+const getRecordTypeIcon = (type = '') => {
+  switch (type.toLowerCase()) {
+    case 'vaccination': return '💉'
+    case 'vet visit': return '🩺'
+    case 'medication': return '💊'
+    case 'allergy': return '⚠️'
+    case 'grooming': return '✂️'
+    default: return '📋'
+  }
+}
+
+const getPetSpeciesIcon = (species = 'Dog') => {
+  switch (species) {
+    case 'Cat': return '🐈'
+    case 'Bird': return '🐦'
+    case 'Fish': return '🐠'
+    case 'Rabbit': return '🐇'
+    case 'Hamster': return '🐹'
+    case 'Reptile': return '🦎'
+    default: return '🐕'
+  }
+}
+
+const getPetColorPalette = (species = 'Dog') => {
+  if (species === 'Cat') return ['#bca4ed', '#d7c5a7', '#a9c7e8']
+  return ['#f9c66a', '#e6a980', '#b9d5b5']
+}
+
+const formatDateLabel = (value) => {
+  if (!value) return 'Not recorded'
+  const stamp = new Date(`${value}T00:00:00`)
+  if (Number.isNaN(stamp.getTime())) return 'Not recorded'
+  return stamp.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+}
+
+function PetDetailPage({ pets, tasks, healthRecords, setSelectedPet, setModal, setPetForm, setReminderForm, setHealthCardPet, onDeletePet }) {
   const navigate = useNavigate()
   const { petKey } = useParams()
   const activePet = pets.find((pet) => (pet.id || pet.name) === petKey)
@@ -29,28 +84,70 @@ function PetDetailPage({ pets, tasks, healthRecords, setSelectedPet, setModal, s
   const activePetTasks = tasks.filter((task) => task.pet === activePet.name)
   const petKeyValue = activePet.id || activePet.name
   const activePetRecords = [...(healthRecords[petKeyValue] || [])].sort((a, b) => new Date(b.date) - new Date(a.date))
+  const latestRecord = activePetRecords[0]
+  const vetDetails = activePet.veterinarian || {}
+  const weightText = activePet.weight ? `${activePet.weight}${activePet.weightUnit ? ` ${activePet.weightUnit}` : ''}` : 'Not recorded'
 
   return (
     <section className="pet-detail-page">
       <button className="back-button" onClick={() => navigate('/')}>← Back to my pets</button>
       <div className="pet-detail-hero" style={{ '--pet-color': activePet.color }}>
         <span className="detail-art">{activePet.icon}</span>
-        <div><p className="eyebrow">PET PROFILE</p><h2>{activePet.name}</h2><p>{activePet.breed} · {activePet.age}</p><span className="health-pill">● {activePet.status}</span></div>
-        <div className="pet-actions"><button className="edit-button" onClick={() => { setPetForm({ name: activePet.name, breed: activePet.breed, age: activePet.age, species: activePet.icon === '🐈' ? 'Cat' : 'Dog' }); setModal('edit-pet') }}>Edit pet</button><button className="delete-button" onClick={() => navigate('/')}>Delete</button><button className="add-button" onClick={() => { setReminderForm({ title: '', pet: activePet.name, due: '', type: '💊' }); setModal('reminder') }}>+ Add reminder</button></div>
+        <div>
+          <p className="eyebrow">PET PROFILE</p>
+          <h2>{activePet.name}</h2>
+          <p>{activePet.breed} · {activePet.age}</p>
+          <span className="health-pill">● {activePet.status}</span>
+        </div>
+        <div className="pet-actions">
+          <button className="edit-button" onClick={() => { setPetForm({ ...createEmptyPetForm(), ...activePet, veterinarian: activePet.veterinarian || createEmptyPetForm().veterinarian, allergies: activePet.allergies || [], medications: activePet.medications || [] }); setModal('edit-pet') }}>Edit pet</button>
+          <button className="delete-button" onClick={onDeletePet}>Delete</button>
+          <button className="add-button" onClick={() => { setReminderForm({ title: '', pet: activePet.name, due: '', type: '💊' }); setModal('reminder') }}>+ Add reminder</button>
+          <button className="secondary-cta share-card-button" onClick={() => { setHealthCardPet(activePet); setModal('health-card') }}>Share health card</button>
+        </div>
       </div>
       <div className="detail-grid">
-        <div className="detail-card"><p className="eyebrow">ABOUT {activePet.name.toUpperCase()}</p><h3>Pet details</h3><p>{activePet.status}</p></div>
-        <div className="detail-card"><p className="eyebrow">CARE AT A GLANCE</p><h3>Upcoming reminders</h3>{activePetTasks.length ? <ul className="detail-task-list">{activePetTasks.map((task) => <li key={task.id}><span>{task.icon}</span><div><strong>{task.title}</strong><small>{task.due}</small></div></li>)}</ul> : <p>No upcoming reminders for {activePet.name}.</p>}</div>
+        <div className="detail-card">
+          <p className="eyebrow">ABOUT {activePet.name.toUpperCase()}</p>
+          <h3>Pet details</h3>
+          <div className="pet-meta-grid">
+            <div><span>Species</span><strong>{activePet.species || 'Unknown'}</strong></div>
+            <div><span>Gender</span><strong>{activePet.gender || 'Not set'}</strong></div>
+            <div><span>Weight</span><strong>{weightText}</strong></div>
+            <div><span>Date of birth</span><strong>{activePet.dateOfBirth ? formatDateLabel(activePet.dateOfBirth) : 'Not set'}</strong></div>
+            <div><span>Microchip</span><strong>{activePet.microchipId || 'Not set'}</strong></div>
+            <div><span>Vet</span><strong>{vetDetails.name ? `${vetDetails.name} • ${vetDetails.clinic || 'Clinic'}` : 'No vet on file'}</strong></div>
+          </div>
+        </div>
+        <div className="detail-card">
+          <p className="eyebrow">CARE SNAPSHOT</p>
+          <h3>Health snapshot</h3>
+          <div className="snapshot-list">
+            <div><span>Allergies</span><strong>{(activePet.allergies || []).length ? activePet.allergies.join(', ') : 'No known allergies'}</strong></div>
+            <div><span>Medications</span><strong>{(activePet.medications || []).length ? activePet.medications.join(', ') : 'No active medications'}</strong></div>
+            <div><span>Latest record</span><strong>{latestRecord ? `${latestRecord.type} • ${latestRecord.title}` : 'No records yet'}</strong></div>
+            <div><span>Upcoming reminders</span><strong>{activePetTasks.length ? `${activePetTasks.length} scheduled` : 'No upcoming reminders'}</strong></div>
+          </div>
+        </div>
       </div>
       <div className="detail-card health-records-card">
-        <div className="record-heading"><div><p className="eyebrow">DIGITAL HEALTH RECORDS</p><h3>{activePet.name}'s health records</h3></div><button className="text-button" onClick={() => setModal('record')}>+ Add record</button></div>
-        {activePetRecords.length ? <div className="health-record-list">{activePetRecords.map((record) => <button key={record.id} className="health-record" onClick={() => navigate(`/pets/${petKeyValue}/records/${record.id}`)}><span className={`record-icon ${record.type.toLowerCase().replace(' ', '-')}`}>{record.type === 'Vaccination' ? '💉' : record.type === 'Vet Visit' ? '🩺' : '💊'}</span><div><time>{new Date(`${record.date}T00:00:00`).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}</time><strong>{record.type}</strong><h4>{record.title}</h4>{record.description && <p>{record.description}</p>}{(record.veterinarian || record.nextDueDate) && <div className="record-meta">{record.veterinarian && <span>🩺 {record.veterinarian}</span>}{record.nextDueDate && <span>Next due: {new Date(`${record.nextDueDate}T00:00:00`).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}</span>}</div>}</div><span className="record-arrow">→</span></button>)}</div> : <div className="health-empty"><span>📋</span><p>No health records yet. Add vaccinations, vet visits, or medications to keep {activePet.name}'s history in one place.</p></div>}
+        <div className="record-heading">
+          <div><p className="eyebrow">DIGITAL HEALTH RECORDS</p><h3>{activePet.name}'s health records</h3></div>
+          <button className="text-button" onClick={() => setModal('record')}>+ Add record</button>
+        </div>
+        {activePetRecords.length ? <div className="health-record-list">{activePetRecords.map((record) => <button key={record.id} className="health-record" onClick={() => navigate(`/pets/${petKeyValue}/records/${record.id}`)}><span className={`record-icon ${record.type.toLowerCase().replace(' ', '-')}`}>{getRecordTypeIcon(record.type)}</span><div><time>{formatDateLabel(record.date)}</time><strong>{record.type}</strong><h4>{record.title}</h4>{record.description && <p>{record.description}</p>}{(record.veterinarian || record.nextDueDate) && <div className="record-meta">{record.veterinarian && <span>🩺 {record.veterinarian}</span>}{record.nextDueDate && <span>Next due: {formatDateLabel(record.nextDueDate)}</span>}</div>}</div><span className="record-arrow">→</span></button>)}</div> : <div className="health-empty"><span>📋</span><p>No health records yet. Add vaccinations, vet visits, medications, or appointment notes to keep {activePet.name}'s history in one place.</p></div>}
+      </div>
+      <div className="detail-card timeline-card">
+        <div className="record-heading">
+          <div><p className="eyebrow">HEALTH TIMELINE</p><h3>{activePet.name}'s care timeline</h3></div>
+        </div>
+        <HealthTimeline records={activePetRecords} />
       </div>
     </section>
   )
 }
 
-function HealthRecordDetailPage({ pets, healthRecords, setModal, setRecordForm, setSelectedHealthRecord }) {
+function HealthRecordDetailPage({ pets, healthRecords, setModal, setRecordForm, setSelectedHealthRecord, onDeleteRecord }) {
   const navigate = useNavigate()
   const { petKey, recordId } = useParams()
   const activePet = pets.find((pet) => (pet.id || pet.name) === petKey)
@@ -75,8 +172,8 @@ function HealthRecordDetailPage({ pets, healthRecords, setModal, setRecordForm, 
   return (
     <section className="health-record-detail">
       <button className="back-button" onClick={() => navigate(`/pets/${petKeyValue}`)}>← Back to health records</button>
-      <div className="record-detail-heading"><span className={`record-icon ${activeRecord.type.toLowerCase().replace(' ', '-')}`}>{activeRecord.type === 'Vaccination' ? '💉' : activeRecord.type === 'Vet Visit' ? '🩺' : '💊'}</span><div><p className="eyebrow">DIGITAL HEALTH RECORD</p><h3>{activeRecord.title}</h3><p>{activeRecord.type}</p></div><div className="record-actions"><button className="edit-button" onClick={() => { setSelectedHealthRecord(activeRecord); setRecordForm({ date: activeRecord.date, type: activeRecord.type, title: activeRecord.title, description: activeRecord.description || '', veterinarian: activeRecord.veterinarian || '', nextDueDate: activeRecord.nextDueDate || '' }); setModal('edit-record') }}>Edit</button><button className="delete-button" onClick={() => navigate(`/pets/${petKeyValue}`)}>Delete</button></div></div>
-      <div className="record-detail-grid"><div><span>Date</span><strong>{new Date(`${activeRecord.date}T00:00:00`).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</strong></div><div><span>Veterinarian</span><strong>{activeRecord.veterinarian || 'Not specified'}</strong></div><div><span>Next due date</span><strong>{activeRecord.nextDueDate ? new Date(`${activeRecord.nextDueDate}T00:00:00`).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) : 'Not specified'}</strong></div></div>
+      <div className="record-detail-heading"><span className={`record-icon ${activeRecord.type.toLowerCase().replace(' ', '-')}`}>{getRecordTypeIcon(activeRecord.type)}</span><div><p className="eyebrow">DIGITAL HEALTH RECORD</p><h3>{activeRecord.title}</h3><p>{activeRecord.type}</p></div><div className="record-actions"><button className="edit-button" onClick={() => { setSelectedHealthRecord(activeRecord); setRecordForm({ date: activeRecord.date, type: activeRecord.type, title: activeRecord.title, description: activeRecord.description || '', veterinarian: activeRecord.veterinarian || '', nextDueDate: activeRecord.nextDueDate || '' }); setModal('edit-record') }}>Edit</button><button className="delete-button" onClick={async () => { if (await onDeleteRecord()) navigate(`/pets/${petKeyValue}`) }}>Delete</button></div></div>
+      <div className="record-detail-grid"><div><span>Date</span><strong>{formatDateLabel(activeRecord.date)}</strong></div><div><span>Veterinarian</span><strong>{activeRecord.veterinarian || 'Not specified'}</strong></div><div><span>Next due date</span><strong>{activeRecord.nextDueDate ? formatDateLabel(activeRecord.nextDueDate) : 'Not specified'}</strong></div></div>
       <div className="record-detail-notes"><span>Description</span><p>{activeRecord.description || 'No additional description was added for this record.'}</p></div>
     </section>
   )
@@ -104,10 +201,11 @@ function App() {
   const [notice, setNotice] = useState('')
   const [firebaseStatus, setFirebaseStatus] = useState(hasFirebaseConfig ? 'Connecting your PawPal account…' : 'Demo mode')
   const [modal, setModal] = useState(null)
-  const [petForm, setPetForm] = useState({ name: '', breed: '', age: '', species: 'Dog' })
+  const [petForm, setPetForm] = useState(createEmptyPetForm)
   const [reminderForm, setReminderForm] = useState({ title: '', pet: 'Buddy', due: '', type: '💊' })
-  const [recordForm, setRecordForm] = useState({ date: '', type: 'Vaccination', title: '', description: '', veterinarian: '', nextDueDate: '' })
+  const [recordForm, setRecordForm] = useState(createEmptyRecordForm)
   const [selectedHealthRecord, setSelectedHealthRecord] = useState(null)
+  const [healthCardPet, setHealthCardPet] = useState(null)
   const [authModal, setAuthModal] = useState(false)
   const [authMode, setAuthMode] = useState('login')
   const [authForm, setAuthForm] = useState({ name: '', email: '', password: '' })
@@ -312,15 +410,24 @@ function App() {
       name: petForm.name.trim(),
       breed: petForm.breed.trim() || `${petForm.species} companion`,
       age: petForm.age.trim() || 'Age not set',
+      species: petForm.species,
+      gender: petForm.gender,
+      weight: petForm.weight,
+      weightUnit: petForm.weightUnit,
+      dateOfBirth: petForm.dateOfBirth,
+      microchipId: petForm.microchipId.trim(),
+      allergies: petForm.allergies,
+      medications: petForm.medications,
+      veterinarian: petForm.veterinarian,
       icon: species,
-      color: colors[pets.length % colors.length],
+      color: petForm.color || colors[pets.length % colors.length],
       status: 'Happy & healthy',
     }
     const updatedPets = [...pets, newPet]
     setPets(updatedPets)
     setSelectedPet(newPet.name)
     setModal(null)
-    setPetForm({ name: '', breed: '', age: '', species: 'Dog' })
+    setPetForm(createEmptyPetForm())
     setNotice(`${newPet.name} has been added to your family.`)
     try { await persistDashboard(updatedPets, tasks, healthRecords) } catch (error) { setNotice(firebaseErrorMessage(error, `${newPet.name} addition`)) }
   }
@@ -333,6 +440,16 @@ function App() {
       name: petForm.name.trim(),
       breed: petForm.breed.trim() || `${petForm.species} companion`,
       age: petForm.age.trim() || 'Age not set',
+      species: petForm.species,
+      gender: petForm.gender,
+      weight: petForm.weight,
+      weightUnit: petForm.weightUnit,
+      dateOfBirth: petForm.dateOfBirth,
+      microchipId: petForm.microchipId.trim(),
+      allergies: petForm.allergies,
+      medications: petForm.medications,
+      veterinarian: petForm.veterinarian,
+      color: petForm.color || activePet.color,
       icon: petForm.species === 'Cat' ? '🐈' : '🐕',
     }
     const updatedPets = pets.map((pet) => pet.id === activePet.id ? updatedPet : pet)
@@ -340,7 +457,7 @@ function App() {
     setPets(updatedPets)
     setTasks(updatedTasks)
     setSelectedPet(updatedPet.name)
-    setPetForm({ name: '', breed: '', age: '', species: 'Dog' })
+    setPetForm(createEmptyPetForm())
     setModal(null)
     setNotice(`${updatedPet.name}'s details were updated.`)
     try { await persistDashboard(updatedPets, updatedTasks, healthRecords) } catch (error) { setNotice(firebaseErrorMessage(error, `${updatedPet.name}'s update`)) }
@@ -361,6 +478,7 @@ function App() {
     navigate('/')
     setNotice(`${petName} and their records were deleted.`)
     try { await persistDashboard(updatedPets, updatedTasks, updatedRecords) } catch (error) { setNotice(firebaseErrorMessage(error, `${petName}'s deletion`)) }
+    return true
   }
 
   const addReminder = async (event) => {
@@ -390,7 +508,7 @@ function App() {
     const updatedRecords = { ...healthRecords, [petKey]: [...(healthRecords[petKey] || []), newRecord] }
     setHealthRecords(updatedRecords)
     setModal(null)
-    setRecordForm({ date: '', type: 'Vaccination', title: '', description: '', veterinarian: '', nextDueDate: '' })
+    setRecordForm(createEmptyRecordForm())
     setNotice(`${newRecord.title} was added to ${activePet.name}'s health records.`)
     try { await persistDashboard(pets, tasks, updatedRecords) } catch (error) { setNotice(firebaseErrorMessage(error, `${activePet.name}'s health record`)) }
   }
@@ -425,6 +543,7 @@ function App() {
     setSelectedHealthRecord(null)
     setNotice(`${recordTitle} was deleted.`)
     try { await persistDashboard(pets, tasks, updatedRecords) } catch (error) { setNotice(firebaseErrorMessage(error, `${activePet.name}'s health record deletion`)) }
+    return true
   }
 
   const activePet = pets.find((pet) => pet.name === selectedPet)
@@ -475,7 +594,7 @@ function App() {
 
       <section className="welcome-row">
         <div><p className="eyebrow">YOUR PET CARE COMPANION</p><h1>{greeting}</h1><p className="welcome-copy">Here’s what’s happening with your furry family today.</p></div>
-        <div className="header-actions"><span className={`sync-status ${firebaseStatus.startsWith('Synced') ? 'synced' : ''}`}>{firebaseStatus}</span><button className="add-button" onClick={() => { setPetForm({ name: '', breed: '', age: '', species: 'Dog' }); setModal('pet') }}>+ Add a pet</button></div>
+        <div className="header-actions"><span className={`sync-status ${firebaseStatus.startsWith('Synced') ? 'synced' : ''}`}>{firebaseStatus}</span><button className="add-button" onClick={() => { setPetForm(createEmptyPetForm()); setModal('pet') }}>+ Add a pet</button></div>
       </section>
 
       {notice && <div className="toast" role="status">{notice}<button onClick={() => setNotice('')} aria-label="Dismiss">×</button></div>}
@@ -510,14 +629,30 @@ function App() {
           </>
         } />
         <Route path="/pets/:petKey" element={
-          <PetDetailPage pets={pets} tasks={tasks} healthRecords={healthRecords} setSelectedPet={setSelectedPet} setModal={setModal} setPetForm={setPetForm} setReminderForm={setReminderForm} />
+          <PetDetailPage pets={pets} tasks={tasks} healthRecords={healthRecords} setSelectedPet={setSelectedPet} setModal={setModal} setPetForm={setPetForm} setReminderForm={setReminderForm} setHealthCardPet={setHealthCardPet} onDeletePet={deletePet} />
         } />
         <Route path="/pets/:petKey/records/:recordId" element={
-          <HealthRecordDetailPage pets={pets} healthRecords={healthRecords} setModal={setModal} setRecordForm={setRecordForm} setSelectedHealthRecord={setSelectedHealthRecord} />
+          <HealthRecordDetailPage pets={pets} healthRecords={healthRecords} setModal={setModal} setRecordForm={setRecordForm} setSelectedHealthRecord={setSelectedHealthRecord} onDeleteRecord={deleteHealthRecord} />
         } />
       </Routes>
 
-      {modal && <div className="modal-backdrop" role="presentation" onMouseDown={() => setModal(null)}>
+      {modal === 'health-card' && healthCardPet && <div className="modal-backdrop" role="presentation" onMouseDown={() => setModal(null)}>
+        <section className="modal-card emergency-card" onMouseDown={(event) => event.stopPropagation()} aria-label={`${healthCardPet.name} emergency health card`}>
+          <div className="modal-heading"><div><p className="eyebrow">EMERGENCY PET PROFILE</p><h2>{healthCardPet.icon} {healthCardPet.name}</h2></div><button type="button" className="close-button" onClick={() => setModal(null)} aria-label="Close">×</button></div>
+          <p className="emergency-card-note">Keep this screen available for veterinary emergencies. It contains no uploaded files or public sharing link.</p>
+          <div className="record-detail-grid">
+            <div><span>Species & breed</span><strong>{healthCardPet.species || 'Pet'} · {healthCardPet.breed || 'Not recorded'}</strong></div>
+            <div><span>Microchip</span><strong>{healthCardPet.microchipId || 'Not recorded'}</strong></div>
+            <div><span>Allergies</span><strong>{healthCardPet.allergies?.length ? healthCardPet.allergies.join(', ') : 'No known allergies'}</strong></div>
+            <div><span>Active medication</span><strong>{healthCardPet.medications?.length ? healthCardPet.medications.join(', ') : 'None recorded'}</strong></div>
+            <div><span>Veterinarian</span><strong>{healthCardPet.veterinarian?.name || 'Not recorded'}</strong></div>
+            <div><span>Vet phone</span><strong>{healthCardPet.veterinarian?.phone || 'Not recorded'}</strong></div>
+          </div>
+          <div className="modal-actions"><button className="cancel-button" onClick={() => setModal(null)}>Close</button><button className="add-button" onClick={() => window.print()}>Print card</button></div>
+        </section>
+      </div>}
+
+      {modal && modal !== 'health-card' && <div className="modal-backdrop" role="presentation" onMouseDown={() => setModal(null)}>
         <form className="modal-card" onSubmit={modal === 'pet' ? addPet : modal === 'edit-pet' ? editPet : modal === 'reminder' ? addReminder : modal === 'edit-record' ? editHealthRecord : addHealthRecord} onMouseDown={(event) => event.stopPropagation()}>
           <div className="modal-heading"><div><p className="eyebrow">PAWPAL</p><h2>{modal === 'pet' ? 'Add a pet' : modal === 'edit-pet' ? 'Edit pet' : modal === 'reminder' ? 'Add a reminder' : modal === 'edit-record' ? 'Edit health record' : 'Add health record'}</h2></div><button type="button" className="close-button" onClick={() => setModal(null)} aria-label="Close">×</button></div>
           {modal === 'pet' || modal === 'edit-pet' ? <>
@@ -525,6 +660,16 @@ function App() {
             <label>Species<select value={petForm.species} onChange={(event) => setPetForm({ ...petForm, species: event.target.value })}><option>Dog</option><option>Cat</option></select></label>
             <label>Breed<input value={petForm.breed} onChange={(event) => setPetForm({ ...petForm, breed: event.target.value })} placeholder="e.g. Golden Retriever" /></label>
             <label>Age<input value={petForm.age} onChange={(event) => setPetForm({ ...petForm, age: event.target.value })} placeholder="e.g. 2 years" /></label>
+            <label>Gender<select value={petForm.gender} onChange={(event) => setPetForm({ ...petForm, gender: event.target.value })}><option>Male</option><option>Female</option><option>Unknown</option></select></label>
+            <label>Date of birth<input type="date" value={petForm.dateOfBirth} onChange={(event) => setPetForm({ ...petForm, dateOfBirth: event.target.value })} /></label>
+            <label>Weight<input type="number" min="0" step="0.1" value={petForm.weight} onChange={(event) => setPetForm({ ...petForm, weight: event.target.value })} placeholder="e.g. 12.5" /></label>
+            <label>Weight unit<select value={petForm.weightUnit} onChange={(event) => setPetForm({ ...petForm, weightUnit: event.target.value })}><option value="kg">kg</option><option value="lb">lb</option></select></label>
+            <label>Microchip ID<input value={petForm.microchipId} onChange={(event) => setPetForm({ ...petForm, microchipId: event.target.value })} placeholder="Optional" /></label>
+            <label>Allergies<input value={petForm.allergies.join(', ')} onChange={(event) => setPetForm({ ...petForm, allergies: event.target.value.split(',').map((item) => item.trim()).filter(Boolean) })} placeholder="e.g. Chicken, pollen" /></label>
+            <label>Active medications<input value={petForm.medications.join(', ')} onChange={(event) => setPetForm({ ...petForm, medications: event.target.value.split(',').map((item) => item.trim()).filter(Boolean) })} placeholder="e.g. Heartgard" /></label>
+            <label>Veterinarian<input value={petForm.veterinarian.name} onChange={(event) => setPetForm({ ...petForm, veterinarian: { ...petForm.veterinarian, name: event.target.value } })} placeholder="e.g. Dr. Ahmed" /></label>
+            <label>Clinic<input value={petForm.veterinarian.clinic} onChange={(event) => setPetForm({ ...petForm, veterinarian: { ...petForm.veterinarian, clinic: event.target.value } })} placeholder="Clinic name" /></label>
+            <label>Vet phone<input type="tel" value={petForm.veterinarian.phone} onChange={(event) => setPetForm({ ...petForm, veterinarian: { ...petForm.veterinarian, phone: event.target.value } })} placeholder="Emergency contact number" /></label>
           </> : modal === 'reminder' ? <>
             <label>Reminder<input required value={reminderForm.title} onChange={(event) => setReminderForm({ ...reminderForm, title: event.target.value })} placeholder="e.g. Vet checkup" /></label>
           <label>Pet<select value={reminderForm.pet} onChange={(event) => setReminderForm({ ...reminderForm, pet: event.target.value })}>{pets.map((pet) => <option key={pet.id || pet.name}>{pet.name}</option>)}</select></label>
@@ -532,7 +677,7 @@ function App() {
             <label>Care type<select value={reminderForm.type} onChange={(event) => setReminderForm({ ...reminderForm, type: event.target.value })}><option value="💊">Medication</option><option value="🩺">Checkup</option><option value="✂️">Grooming</option></select></label>
           </> : <>
             <label>Date<input required type="date" value={recordForm.date} onChange={(event) => setRecordForm({ ...recordForm, date: event.target.value })} /></label>
-            <label>Record type<select value={recordForm.type} onChange={(event) => setRecordForm({ ...recordForm, type: event.target.value })}><option>Vaccination</option><option>Vet Visit</option><option>Medication</option></select></label>
+            <label>Record type<select value={recordForm.type} onChange={(event) => setRecordForm({ ...recordForm, type: event.target.value })}><option>Vaccination</option><option>Vet Visit</option><option>Medication</option><option>Allergy</option><option>Grooming</option></select></label>
             <label>Title<input required value={recordForm.title} onChange={(event) => setRecordForm({ ...recordForm, title: event.target.value })} placeholder="e.g. Rabies Vaccine" /></label>
             <label>Description<textarea value={recordForm.description} onChange={(event) => setRecordForm({ ...recordForm, description: event.target.value })} placeholder="Treatment notes or observations" /></label>
             <label>Veterinarian<input value={recordForm.veterinarian} onChange={(event) => setRecordForm({ ...recordForm, veterinarian: event.target.value })} placeholder="e.g. Dr. Ahmed" /></label>
