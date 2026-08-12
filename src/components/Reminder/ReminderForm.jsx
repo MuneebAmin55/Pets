@@ -35,7 +35,7 @@ export default function ReminderForm({ onSubmit, onCancel, reminder, pets }) {
       <div className="modal-content slide-up" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2>{isEdit ? 'Edit Reminder' : 'Add Reminder'}</h2>
-          <button className="modal-close" onClick={onCancel} aria-label="Close">✕</button>
+          <button type="button" className="modal-close" onClick={onCancel} aria-label="Close">✕</button>
         </div>
         <form onSubmit={handleSubmit}>
           <div className="modal-body">

@@ -1,14 +1,15 @@
 import { createSlice } from '@reduxjs/toolkit';
-import { mockReminders } from '../api/mockData';
-
 const initialState = {
-  list: mockReminders,
+  list: [],
 };
 
 const reminderSlice = createSlice({
   name: 'reminders',
   initialState,
   reducers: {
+    setReminders(state, action) {
+      state.list = action.payload;
+    },
     addReminder(state, action) {
       state.list.push(action.payload);
     },
@@ -26,7 +27,7 @@ const reminderSlice = createSlice({
   },
 });
 
-export const { addReminder, updateReminder, removeReminder, toggleComplete } = reminderSlice.actions;
+export const { setReminders, addReminder, updateReminder, removeReminder, toggleComplete } = reminderSlice.actions;
 export const selectReminders = (state) => state.reminders.list;
 export const selectRemindersByPet = (petId) => (state) =>
   state.reminders.list.filter((r) => r.petId === petId);

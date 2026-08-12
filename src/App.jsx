@@ -1,12 +1,21 @@
 import { useEffect, useMemo, useState } from 'react'
-import { createUserWithEmailAndPassword, onAuthStateChanged, sendPasswordResetEmail, signInWithEmailAndPassword, signOut, updateProfile } from 'firebase/auth'
-import { doc, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore'
-import { Routes, Route, useNavigate, useParams } from 'react-router-dom'
-import { auth, db, hasFirebaseConfig } from './firebase'
+import { useDispatch, useSelector } from 'react-redux'
+import { Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { selectPets, setPets } from './features/petsSlice'
+import { selectReminders, setReminders } from './features/reminderSlice'
+import { setAllRecords } from './features/healthSlice'
+import { completePasswordReset, loginUser, logout as logoutUser, registerUser, requestPasswordReset, selectAuthLoading, selectIsAuth, selectUser, verifyPasswordResetOtp } from './features/userSlice'
+import { loadDashboard, saveDashboard, selectCompletedCount, selectDashboardStatus, setCompletedCount } from './features/dashboardSlice'
+import ReminderForm from './components/Reminder/ReminderForm'
+import ReminderList from './components/Reminder/ReminderList'
+import HealthRecordForm from './components/Health/HealthRecordForm'
+import HealthRecordList from './components/Health/HealthRecordList'
 import HealthTimeline from './components/Health/HealthTimeline'
+import DocumentsPage from './components/Documents/DocumentsPage'
 import './App.css'
+import './styles/global.css'
 
-const createEmptyPetForm = () => ({
+const emptyPet = () => ({
   name: '',
   species: 'Dog',
   breed: '',
@@ -14,566 +23,682 @@ const createEmptyPetForm = () => ({
   gender: 'Male',
   weight: '',
   weightUnit: 'kg',
-  color: '',
-  microchipId: '',
-  dateOfBirth: '',
-  allergies: [],
-  medications: [],
-  veterinarian: { name: '', clinic: '', phone: '', email: '', address: '' },
 })
 
-const createEmptyReminderForm = () => ({ title: '', pet: 'Buddy', due: '', type: '💊' })
-const createEmptyRecordForm = () => ({ date: '', type: 'Vaccination', title: '', description: '', veterinarian: '', nextDueDate: '' })
+const petIcon = (species) => (species === 'Cat' ? '🐈' : species === 'Bird' ? '🐦' : '🐕')
 
-const getRecordTypeIcon = (type = '') => {
-  switch (type.toLowerCase()) {
-    case 'vaccination': return '💉'
-    case 'vet visit': return '🩺'
-    case 'medication': return '💊'
-    case 'allergy': return '⚠️'
-    case 'grooming': return '✂️'
-    default: return '📋'
+const computeCompletedCount = (list) => list.filter((item) => item.completed).length
+
+const isUuid = (value) =>
+  typeof value === 'string' &&
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+
+const ensureUuid = (value) => (isUuid(value) ? value : crypto.randomUUID())
+
+const normalizeReminder = (reminder, pets = []) => {
+  const dueDate = reminder.dueDate || reminder.due || ''
+  const pet = pets.find((item) => item.id === reminder.petId) || pets.find((item) => item.name === reminder.petName) || null
+
+  return {
+    ...reminder,
+    petId: reminder.petId || pet?.id || '',
+    petName: reminder.petName || pet?.name || reminder.pet || '',
+    type: reminder.type || 'vaccination',
+    title: reminder.title || '',
+    dueDate,
+    due: dueDate,
+    notes: reminder.notes || '',
+    completed: Boolean(reminder.completed),
   }
 }
 
-const getPetSpeciesIcon = (species = 'Dog') => {
-  switch (species) {
-    case 'Cat': return '🐈'
-    case 'Bird': return '🐦'
-    case 'Fish': return '🐠'
-    case 'Rabbit': return '🐇'
-    case 'Hamster': return '🐹'
-    case 'Reptile': return '🦎'
-    default: return '🐕'
+const normalizeRecordsMap = (recordsMap, pets = []) => Object.entries(recordsMap || {}).reduce((acc, [petId, items]) => {
+  const pet = pets.find((item) => item.id === petId)
+  acc[petId] = (Array.isArray(items) ? items : []).map((record) => ({
+    ...record,
+    petId: record.petId || pet?.id || petId,
+    petName: record.petName || pet?.name || '',
+    type: record.type || 'vaccination',
+    title: record.title || '',
+    date: record.date || '',
+    description: record.description || record.notes || '',
+    notes: record.notes || record.description || '',
+    veterinarian: record.veterinarian || '',
+    nextDueDate: record.nextDueDate || '',
+  }))
+  return acc
+}, {})
+
+const mergeById = (items, nextItem) => {
+  const index = items.findIndex((item) => item.id === nextItem.id)
+  if (index === -1) return [...items, nextItem]
+  return items.map((item) => (item.id === nextItem.id ? nextItem : item))
+}
+
+const locateRecord = (records, recordId) => {
+  for (const [petId, items] of Object.entries(records)) {
+    const record = items.find((item) => item.id === recordId)
+    if (record) return { petId, record }
   }
+  return null
 }
 
-const getPetColorPalette = (species = 'Dog') => {
-  if (species === 'Cat') return ['#bca4ed', '#d7c5a7', '#a9c7e8']
-  return ['#f9c66a', '#e6a980', '#b9d5b5']
-}
-
-const formatDateLabel = (value) => {
-  if (!value) return 'Not recorded'
-  const stamp = new Date(`${value}T00:00:00`)
-  if (Number.isNaN(stamp.getTime())) return 'Not recorded'
-  return stamp.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
-}
-
-function PetDetailPage({ pets, tasks, healthRecords, setSelectedPet, setModal, setPetForm, setReminderForm, setHealthCardPet, onDeletePet }) {
+function ResetPasswordPage() {
+  const dispatch = useDispatch()
   const navigate = useNavigate()
-  const { petKey } = useParams()
-  const activePet = pets.find((pet) => (pet.id || pet.name) === petKey)
+  const [form, setForm] = useState({
+    email: '',
+    otp: '',
+    password: '',
+    confirmPassword: '',
+  })
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [stage, setStage] = useState('request')
+  const [resetToken, setResetToken] = useState('')
 
-  useEffect(() => {
-    if (activePet) {
-      setSelectedPet(activePet.name)
+  const requestOtp = async (event) => {
+    event.preventDefault()
+    setError('')
+    setNotice('')
+
+    if (!form.email.trim()) {
+      setError('Enter your email address.')
+      return
     }
-  }, [activePet, setSelectedPet])
 
-  if (!activePet) {
+    setBusy(true)
+    try {
+      await dispatch(requestPasswordReset(form.email.trim())).unwrap()
+      setResetToken('')
+      setForm((current) => ({ ...current, otp: '', password: '', confirmPassword: '' }))
+      setStage('verify')
+      setNotice('OTP sent to your email.')
+    } catch (requestError) {
+      setError(requestError?.response?.data?.message || requestError?.message || 'Unable to send OTP.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const verifyOtp = async (event) => {
+    event.preventDefault()
+    setError('')
+    setNotice('')
+
+    if (!form.email.trim() || !form.otp.trim()) {
+      setError('Enter the email and OTP from your email.')
+      return
+    }
+
+    setBusy(true)
+    try {
+      const response = await dispatch(verifyPasswordResetOtp({ email: form.email.trim(), otp: form.otp.trim() })).unwrap()
+      setResetToken(response.resetToken)
+      setStage('reset')
+      setNotice('OTP verified. Set your new password.')
+    } catch (requestError) {
+      setError(requestError?.response?.data?.message || requestError?.message || 'Unable to verify OTP.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const submitPassword = async (event) => {
+    event.preventDefault()
+    setError('')
+    setNotice('')
+
+    if (form.password.length < 6) {
+      setError('Password must be at least 6 characters.')
+      return
+    }
+
+    if (form.password !== form.confirmPassword) {
+      setError('Passwords do not match.')
+      return
+    }
+
+    setBusy(true)
+    try {
+      await dispatch(completePasswordReset({ resetToken, password: form.password })).unwrap()
+      setStage('done')
+      setNotice('Your password has been reset. You can sign in now.')
+    } catch (requestError) {
+      setError(requestError?.response?.data?.message || requestError?.message || 'Unable to reset password.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <main className="pawpal-shell">
+      <nav className="topbar">
+        <button className="brand" type="button" onClick={() => navigate('/')}>
+          <span className="brand-mark">🐾</span>
+          <span>PawPal</span>
+        </button>
+      </nav>
+      <section className="signed-out">
+        <span>🔐</span>
+        <p className="eyebrow">RESET PASSWORD</p>
+        <h1>Verify your OTP.</h1>
+        <p>Enter the OTP from your email, then choose a new password.</p>
+        {stage === 'done' ? (
+          <>
+            <p>{notice}</p>
+            <button className="add-button" type="button" onClick={() => navigate('/')}>Back to login</button>
+          </>
+        ) : stage === 'request' ? (
+          <form className="modal-card auth-card" onSubmit={requestOtp}>
+            <label>
+              Email
+              <input
+                required
+                type="email"
+                value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+                placeholder="you@example.com"
+              />
+            </label>
+            {error && <p className="auth-error">{error}</p>}
+            {notice && <p className="auth-success">{notice}</p>}
+            <button className="add-button auth-submit" disabled={busy}>
+              {busy ? 'Please wait…' : 'Send OTP'}
+            </button>
+            <p className="auth-switch">
+              <button type="button" onClick={() => setStage('request')}>Back to email step</button>
+            </p>
+          </form>
+        ) : stage === 'verify' ? (
+          <form className="modal-card auth-card" onSubmit={verifyOtp}>
+            <label>
+              Email
+              <input
+                required
+                type="email"
+                value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+              />
+            </label>
+            <label>
+              OTP
+              <input
+                required
+                inputMode="numeric"
+                value={form.otp}
+                onChange={(e) => setForm({ ...form, otp: e.target.value })}
+                placeholder="6-digit code"
+              />
+            </label>
+            {error && <p className="auth-error">{error}</p>}
+            {notice && <p className="auth-success">{notice}</p>}
+            <button className="add-button auth-submit" disabled={busy}>
+              {busy ? 'Please wait…' : 'Verify OTP'}
+            </button>
+            <p className="auth-switch">
+              <button type="button" onClick={() => setStage('request')}>Resend OTP</button>
+              ·
+              <button type="button" onClick={() => setStage('request')}>Back to email step</button>
+            </p>
+          </form>
+        ) : (
+          <form className="modal-card auth-card" onSubmit={submitPassword}>
+            <label>
+              New password
+              <input
+                required
+                minLength="6"
+                type="password"
+                value={form.password}
+                onChange={(e) => setForm({ ...form, password: e.target.value })}
+              />
+            </label>
+            <label>
+              Confirm password
+              <input
+                required
+                minLength="6"
+                type="password"
+                value={form.confirmPassword}
+                onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })}
+              />
+            </label>
+            {error && <p className="auth-error">{error}</p>}
+            {notice && <p className="auth-success">{notice}</p>}
+            <button className="add-button auth-submit" disabled={busy}>
+              {busy ? 'Please wait…' : 'Reset password'}
+            </button>
+            <p className="auth-switch">
+              <button type="button" onClick={() => setStage('verify')}>Back to OTP</button>
+            </p>
+          </form>
+        )}
+      </section>
+    </main>
+  )
+}
+
+function PetPage({
+  pets,
+  reminders,
+  records,
+  onRemovePet,
+  onOpenReminder,
+  onOpenRecord,
+  onToggleReminder,
+  onDeleteReminder,
+  onEditRecord,
+  onDeleteRecord,
+}) {
+  const { petId } = useParams()
+  const navigate = useNavigate()
+  const pet = pets.find((item) => item.id === petId)
+
+  if (!pet) {
     return (
       <section className="empty-page">
-        <p className="eyebrow">Pet not found</p>
-        <h2>We couldn't find that pet.</h2>
-        <button className="add-button" onClick={() => navigate('/')}>Back home</button>
+        <h2>Pet not found</h2>
+        <button className="add-button" type="button" onClick={() => navigate('/')}>Back home</button>
       </section>
     )
   }
 
-  const activePetTasks = tasks.filter((task) => task.pet === activePet.name)
-  const petKeyValue = activePet.id || activePet.name
-  const activePetRecords = [...(healthRecords[petKeyValue] || [])].sort((a, b) => new Date(b.date) - new Date(a.date))
-  const latestRecord = activePetRecords[0]
-  const vetDetails = activePet.veterinarian || {}
-  const weightText = activePet.weight ? `${activePet.weight}${activePet.weightUnit ? ` ${activePet.weightUnit}` : ''}` : 'Not recorded'
+  const petRecords = [...(records[pet.id] || [])].sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0))
+  const petReminders = reminders.filter((item) => item.petId === pet.id || item.petName === pet.name)
 
   return (
     <section className="pet-detail-page">
-      <button className="back-button" onClick={() => navigate('/')}>← Back to my pets</button>
-      <div className="pet-detail-hero" style={{ '--pet-color': activePet.color }}>
-        <span className="detail-art">{activePet.icon}</span>
+      <button className="back-button" type="button" onClick={() => navigate('/')}>← Back to my pets</button>
+      <div className="pet-detail-hero" style={{ '--pet-color': pet.color || '#f9c66a' }}>
+        <span className="detail-art">{pet.icon || petIcon(pet.species)}</span>
         <div>
           <p className="eyebrow">PET PROFILE</p>
-          <h2>{activePet.name}</h2>
-          <p>{activePet.breed} · {activePet.age}</p>
-          <span className="health-pill">● {activePet.status}</span>
+          <h2>{pet.name}</h2>
+          <p>{pet.breed || `${pet.species} companion`} · {pet.age || 'Age not set'}</p>
+          <span className="health-pill">● Happy & healthy</span>
         </div>
         <div className="pet-actions">
-          <button className="edit-button" onClick={() => { setPetForm({ ...createEmptyPetForm(), ...activePet, veterinarian: activePet.veterinarian || createEmptyPetForm().veterinarian, allergies: activePet.allergies || [], medications: activePet.medications || [] }); setModal('edit-pet') }}>Edit pet</button>
-          <button className="delete-button" onClick={onDeletePet}>Delete</button>
-          <button className="add-button" onClick={() => { setReminderForm({ title: '', pet: activePet.name, due: '', type: '💊' }); setModal('reminder') }}>+ Add reminder</button>
-          <button className="secondary-cta share-card-button" onClick={() => { setHealthCardPet(activePet); setModal('health-card') }}>Share health card</button>
+          <button className="add-button" type="button" onClick={() => onOpenReminder(pet.id)}>Add reminder</button>
+          <button className="add-button" type="button" onClick={() => onOpenRecord(pet.id)}>Add record</button>
+          <button className="delete-button" type="button" onClick={() => onRemovePet(pet)}>Delete</button>
         </div>
       </div>
-      <div className="detail-grid">
-        <div className="detail-card">
-          <p className="eyebrow">ABOUT {activePet.name.toUpperCase()}</p>
-          <h3>Pet details</h3>
-          <div className="pet-meta-grid">
-            <div><span>Species</span><strong>{activePet.species || 'Unknown'}</strong></div>
-            <div><span>Gender</span><strong>{activePet.gender || 'Not set'}</strong></div>
-            <div><span>Weight</span><strong>{weightText}</strong></div>
-            <div><span>Date of birth</span><strong>{activePet.dateOfBirth ? formatDateLabel(activePet.dateOfBirth) : 'Not set'}</strong></div>
-            <div><span>Microchip</span><strong>{activePet.microchipId || 'Not set'}</strong></div>
-            <div><span>Vet</span><strong>{vetDetails.name ? `${vetDetails.name} • ${vetDetails.clinic || 'Clinic'}` : 'No vet on file'}</strong></div>
+
+      <div className="detail-card">
+        <div className="record-heading">
+          <div>
+            <p className="eyebrow">REMINDERS</p>
+            <h3>{pet.name}'s reminders</h3>
           </div>
         </div>
-        <div className="detail-card">
-          <p className="eyebrow">CARE SNAPSHOT</p>
-          <h3>Health snapshot</h3>
-          <div className="snapshot-list">
-            <div><span>Allergies</span><strong>{(activePet.allergies || []).length ? activePet.allergies.join(', ') : 'No known allergies'}</strong></div>
-            <div><span>Medications</span><strong>{(activePet.medications || []).length ? activePet.medications.join(', ') : 'No active medications'}</strong></div>
-            <div><span>Latest record</span><strong>{latestRecord ? `${latestRecord.type} • ${latestRecord.title}` : 'No records yet'}</strong></div>
-            <div><span>Upcoming reminders</span><strong>{activePetTasks.length ? `${activePetTasks.length} scheduled` : 'No upcoming reminders'}</strong></div>
-          </div>
-        </div>
+        <ReminderList reminders={petReminders} onToggle={onToggleReminder} onDelete={onDeleteReminder} />
       </div>
+
       <div className="detail-card health-records-card">
         <div className="record-heading">
-          <div><p className="eyebrow">DIGITAL HEALTH RECORDS</p><h3>{activePet.name}'s health records</h3></div>
-          <button className="text-button" onClick={() => setModal('record')}>+ Add record</button>
+          <div>
+            <p className="eyebrow">HEALTH RECORDS</p>
+            <h3>{pet.name}'s health records</h3>
+          </div>
         </div>
-        {activePetRecords.length ? <div className="health-record-list">{activePetRecords.map((record) => <button key={record.id} className="health-record" onClick={() => navigate(`/pets/${petKeyValue}/records/${record.id}`)}><span className={`record-icon ${record.type.toLowerCase().replace(' ', '-')}`}>{getRecordTypeIcon(record.type)}</span><div><time>{formatDateLabel(record.date)}</time><strong>{record.type}</strong><h4>{record.title}</h4>{record.description && <p>{record.description}</p>}{(record.veterinarian || record.nextDueDate) && <div className="record-meta">{record.veterinarian && <span>🩺 {record.veterinarian}</span>}{record.nextDueDate && <span>Next due: {formatDateLabel(record.nextDueDate)}</span>}</div>}</div><span className="record-arrow">→</span></button>)}</div> : <div className="health-empty"><span>📋</span><p>No health records yet. Add vaccinations, vet visits, medications, or appointment notes to keep {activePet.name}'s history in one place.</p></div>}
+        <HealthRecordList records={petRecords} onEdit={onEditRecord} onDelete={onDeleteRecord} />
       </div>
+
       <div className="detail-card timeline-card">
-        <div className="record-heading">
-          <div><p className="eyebrow">HEALTH TIMELINE</p><h3>{activePet.name}'s care timeline</h3></div>
-        </div>
-        <HealthTimeline records={activePetRecords} />
+        <HealthTimeline records={petRecords} />
       </div>
     </section>
   )
 }
-
-function HealthRecordDetailPage({ pets, healthRecords, setModal, setRecordForm, setSelectedHealthRecord, onDeleteRecord }) {
-  const navigate = useNavigate()
-  const { petKey, recordId } = useParams()
-  const activePet = pets.find((pet) => (pet.id || pet.name) === petKey)
-  const activeRecord = activePet ? (healthRecords[petKey] || []).find((record) => record.id === recordId) : null
-
-  if (!activePet || !activeRecord) {
-    return (
-      <section className="empty-page">
-        <p className="eyebrow">Record not found</p>
-        <h2>We couldn't find that health record.</h2>
-        <button className="add-button" onClick={() => navigate('/')}>Back home</button>
-      </section>
-    )
-  }
-
-  useEffect(() => {
-    setSelectedHealthRecord(activeRecord)
-  }, [activeRecord, setSelectedHealthRecord])
-
-  const petKeyValue = activePet.id || activePet.name
-
-  return (
-    <section className="health-record-detail">
-      <button className="back-button" onClick={() => navigate(`/pets/${petKeyValue}`)}>← Back to health records</button>
-      <div className="record-detail-heading"><span className={`record-icon ${activeRecord.type.toLowerCase().replace(' ', '-')}`}>{getRecordTypeIcon(activeRecord.type)}</span><div><p className="eyebrow">DIGITAL HEALTH RECORD</p><h3>{activeRecord.title}</h3><p>{activeRecord.type}</p></div><div className="record-actions"><button className="edit-button" onClick={() => { setSelectedHealthRecord(activeRecord); setRecordForm({ date: activeRecord.date, type: activeRecord.type, title: activeRecord.title, description: activeRecord.description || '', veterinarian: activeRecord.veterinarian || '', nextDueDate: activeRecord.nextDueDate || '' }); setModal('edit-record') }}>Edit</button><button className="delete-button" onClick={async () => { if (await onDeleteRecord()) navigate(`/pets/${petKeyValue}`) }}>Delete</button></div></div>
-      <div className="record-detail-grid"><div><span>Date</span><strong>{formatDateLabel(activeRecord.date)}</strong></div><div><span>Veterinarian</span><strong>{activeRecord.veterinarian || 'Not specified'}</strong></div><div><span>Next due date</span><strong>{activeRecord.nextDueDate ? formatDateLabel(activeRecord.nextDueDate) : 'Not specified'}</strong></div></div>
-      <div className="record-detail-notes"><span>Description</span><p>{activeRecord.description || 'No additional description was added for this record.'}</p></div>
-    </section>
-  )
-}
-
-const defaultPets = [
-  { name: 'Buddy', breed: 'Golden Retriever', age: '3 years', icon: '🐕', color: '#f9c66a', status: 'Happy & healthy' },
-  { name: 'Luna', breed: 'Siamese Cat', age: '2 years', icon: '🐈', color: '#bca4ed', status: 'Due for a checkup' },
-  { name: 'Max', breed: 'German Shepherd', age: '5 years', icon: '🐕', color: '#e6a980', status: 'Medication today' },
-]
-
-const defaultTasks = [
-  { id: 1, title: 'Heartgard Plus', pet: 'Buddy', due: 'Today', icon: '💊', tone: 'orange' },
-  { id: 2, title: 'Apoquel refill', pet: 'Max', due: 'Aug 15', icon: '💊', tone: 'purple' },
-  { id: 3, title: 'Full grooming session', pet: 'Buddy', due: 'Aug 20', icon: '✂️', tone: 'teal' },
-]
 
 function App() {
-  const [activeTab, setActiveTab] = useState('Overview')
-  const [pets, setPets] = useState([])
-  const [tasks, setTasks] = useState([])
-  const [healthRecords, setHealthRecords] = useState({})
-  const [selectedPet, setSelectedPet] = useState('Buddy')
-  const [completedCount, setCompletedCount] = useState(0)
+  const dispatch = useDispatch()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const pets = useSelector(selectPets)
+  const reminders = useSelector(selectReminders)
+  const records = useSelector((state) => state.health.records)
+  const completedCount = useSelector(selectCompletedCount)
+  const dashboardStatus = useSelector(selectDashboardStatus)
+  const user = useSelector(selectUser)
+  const isAuthenticated = useSelector(selectIsAuth)
+  const authBusy = useSelector(selectAuthLoading)
+
   const [notice, setNotice] = useState('')
-  const [firebaseStatus, setFirebaseStatus] = useState(hasFirebaseConfig ? 'Connecting your PawPal account…' : 'Demo mode')
-  const [modal, setModal] = useState(null)
-  const [petForm, setPetForm] = useState(createEmptyPetForm)
-  const [reminderForm, setReminderForm] = useState({ title: '', pet: 'Buddy', due: '', type: '💊' })
-  const [recordForm, setRecordForm] = useState(createEmptyRecordForm)
-  const [selectedHealthRecord, setSelectedHealthRecord] = useState(null)
-  const [healthCardPet, setHealthCardPet] = useState(null)
-  const [authModal, setAuthModal] = useState(false)
   const [authMode, setAuthMode] = useState('login')
   const [authForm, setAuthForm] = useState({ name: '', email: '', password: '' })
-  const [authUser, setAuthUser] = useState(null)
   const [authError, setAuthError] = useState('')
-  const [authBusy, setAuthBusy] = useState(false)
-  const navigate = useNavigate()
+  const [modal, setModal] = useState(null)
+  const [petForm, setPetForm] = useState(emptyPet)
+  const [reminderDraft, setReminderDraft] = useState(null)
+  const [recordDraft, setRecordDraft] = useState(null)
+  const isResetRoute = location.pathname === '/reset-password'
 
-  const completed = 0
-  const firstName = useMemo(() => {
-    if (!authUser || authUser.isAnonymous) return ''
-    return (authUser.displayName || authUser.email?.split('@')[0] || '').split(' ')[0]
-  }, [authUser])
-  const greeting = useMemo(() => selectedPet === 'Buddy' ? `Good morning${firstName ? `, ${firstName}` : ''}!` : `${selectedPet} is looking great!`, [firstName, selectedPet])
+  const allRecords = useMemo(
+    () => Object.entries(records).flatMap(([petId, items]) => (items || []).map((record) => ({ ...record, petId }))),
+    [records],
+  )
 
-  const persistDashboard = async (nextPets, nextTasks, nextHealthRecords = healthRecords, nextCompletedCount = completedCount) => {
-    if (hasFirebaseConfig && auth?.currentUser && db) {
-      const user = auth.currentUser
-      await setDoc(doc(db, 'pawpalDashboards', user.uid), {
-        pets: nextPets,
-        tasks: nextTasks,
-        healthRecords: nextHealthRecords,
-        completedCount: nextCompletedCount,
-        profile: {
-          displayName: user.displayName || '',
-          email: user.isAnonymous ? '' : user.email || '',
-        },
-        updatedAt: serverTimestamp(),
-      }, { merge: true })
-    }
-  }
-
-  const firebaseErrorMessage = (error, action) => {
-    const messages = {
-      'permission-denied': `Firestore blocked ${action}. Publish the PawPal Firestore security rule.`,
-      'unauthenticated': `Sign in is required before ${action} can be synced.`,
-      'failed-precondition': 'Create a Firestore Database in Firebase Console, then try again.',
-      'unavailable': 'Firestore is temporarily unavailable. Check your connection and try again.',
-    }
-    return messages[error?.code] || `${action} could not be synced (${error?.code || 'unknown Firebase error'}).`
-  }
-
-  const openSection = (section) => {
-    setActiveTab(section === 'my-pets' ? 'My Pets' : section === 'calendar' ? 'Calendar' : 'Overview')
-    document.getElementById(section)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }
-
-  const formatDueDate = (date) => {
-    if (!date) return 'Upcoming'
-    if (date === new Date().toISOString().slice(0, 10)) return 'Today'
-    return new Date(`${date}T00:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-  }
-
-  const isStarterDashboard = (data) =>
-    Array.isArray(data.pets) &&
-    Array.isArray(data.tasks) &&
-    data.pets.length === defaultPets.length &&
-    data.tasks.length === defaultTasks.length &&
-    data.pets.every((pet, index) => pet.name === defaultPets[index].name) &&
-    data.tasks.every((task, index) => task.title === defaultTasks[index].title)
+  const persistDashboard = (nextPets = pets, nextReminders = reminders, nextRecords = records, nextCompletedCount = completedCount) =>
+    dispatch(saveDashboard({ pets: nextPets, tasks: nextReminders, healthRecords: nextRecords, completedCount: nextCompletedCount })).unwrap()
 
   useEffect(() => {
-    if (!hasFirebaseConfig || !auth || !db) {
-      setPets([])
-      setTasks([])
-      setHealthRecords({})
-      setFirebaseStatus('Firebase configuration required')
-      return undefined
-    }
+    if (!isAuthenticated) return
 
-    let unsubscribeSnapshot
-    const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
-      try {
-        unsubscribeSnapshot?.()
-        if (!user || user.isAnonymous) {
-          if (user?.isAnonymous) await signOut(auth)
-          setAuthUser(null)
-          setPets([])
-          setTasks([])
-          setHealthRecords({})
-          setFirebaseStatus('Sign in to access your private dashboard')
+    dispatch(loadDashboard()).unwrap()
+      .then((data) => {
+        const nextPets = Array.isArray(data.pets) ? data.pets : []
+        const nextReminders = Array.isArray(data.tasks) ? data.tasks.map((reminder) => normalizeReminder(reminder, nextPets)) : []
+        const nextRecords = normalizeRecordsMap(data.healthRecords && typeof data.healthRecords === 'object' ? data.healthRecords : {}, nextPets)
+
+        dispatch(setPets(nextPets))
+        dispatch(setReminders(nextReminders))
+        dispatch(setAllRecords(nextRecords))
+        dispatch(setCompletedCount(typeof data.completedCount === 'number' ? data.completedCount : computeCompletedCount(nextReminders)))
+      })
+      .catch((error) => {
+        if (error?.response?.status === 401) {
+          dispatch(logoutUser())
+          setNotice('Your session expired. Please sign in again.')
           return
         }
-        setAuthUser(user)
-        const dashboardRef = doc(db, 'pawpalDashboards', user.uid)
 
-        unsubscribeSnapshot = onSnapshot(dashboardRef, async (snapshot) => {
-          if (snapshot.exists()) {
-            const data = snapshot.data()
-            if (isStarterDashboard(data)) {
-              setPets([])
-              setTasks([])
-              setCompletedCount(0)
-              await persistDashboard([], [], {}, 0)
-            } else {
-              if (Array.isArray(data.pets)) setPets(data.pets)
-              if (Array.isArray(data.tasks)) setTasks(data.tasks)
-              setHealthRecords(data.healthRecords && typeof data.healthRecords === 'object' ? data.healthRecords : {})
-              setCompletedCount(typeof data.completedCount === 'number' ? data.completedCount : 0)
-            }
-          } else {
-            try {
-              await persistDashboard([], [], {})
-            } catch (error) {
-              setFirebaseStatus('Unable to sync — using demo data')
-              setNotice(firebaseErrorMessage(error, 'your dashboard'))
-              return
-            }
-          }
-          setFirebaseStatus('Synced with Firebase')
-        }, (error) => {
-          setFirebaseStatus('Unable to sync — using demo data')
-          setNotice(error.code === 'permission-denied' ? 'Firestore access is blocked by your security rules.' : 'Firebase sync is unavailable. Check your project settings.')
-        })
-      } catch (error) {
-        setAuthUser(null)
-        setFirebaseStatus('Unable to connect — using demo data')
-        setNotice(error.code === 'auth/operation-not-allowed' ? 'Enable Anonymous sign-in in Firebase Authentication to connect PawPal.' : 'Firebase could not connect. Check .env.local values.')
-      }
-    })
+        setNotice('Unable to load your dashboard. Check that the Node API is running.')
+      })
+  }, [dispatch, isAuthenticated])
 
-    return () => {
-      unsubscribeAuth()
-      unsubscribeSnapshot?.()
+  const openPetModal = () => {
+    setPetForm(emptyPet())
+    setModal('pet')
+  }
+
+  const openReminderModal = (petId = '') => {
+    const pet = pets.find((item) => item.id === petId)
+    setReminderDraft(
+      pet
+        ? { petId: pet.id, petName: pet.name, type: 'vaccination', title: '', dueDate: '', notes: '', completed: false }
+        : null,
+    )
+    setModal('reminder')
+  }
+
+  const openRecordModal = (petId = '') => {
+    const pet = pets.find((item) => item.id === petId)
+    setRecordDraft(
+      pet
+        ? { petId: pet.id, petName: pet.name, type: 'vaccination', title: '', date: '', nextDueDate: '', veterinarian: '', notes: '' }
+        : null,
+    )
+    setModal('record')
+  }
+
+  const openRecordEditor = (record) => {
+    setRecordDraft({ ...record })
+    setModal('record')
+  }
+
+  const savePet = async (event) => {
+    event.preventDefault()
+
+    const colors = ['#f9c66a', '#bca4ed', '#e6a980']
+    const pet = {
+      ...petForm,
+      id: crypto.randomUUID(),
+      name: petForm.name.trim(),
+      breed: petForm.breed.trim() || `${petForm.species} companion`,
+      age: petForm.age.trim() || 'Age not set',
+      icon: petIcon(petForm.species),
+      color: colors[pets.length % colors.length],
+      status: 'Happy & healthy',
     }
-  }, [])
 
-  const openAuth = (mode) => {
-    setAuthMode(mode)
-    setAuthError('')
-    setAuthModal(true)
+    const nextPets = [...pets, pet]
+    dispatch(setPets(nextPets))
+    setModal(null)
+    setPetForm(emptyPet())
+
+    try {
+      await persistDashboard(nextPets)
+      setNotice(`${pet.name} has been added to your family.`)
+    } catch {
+      setNotice('Pet saved locally, but the Node API could not be reached.')
+    }
+  }
+
+  const saveReminder = async (reminder) => {
+    if (!reminder?.petId) {
+      setNotice('Choose a pet for the reminder.')
+      return
+    }
+
+    const pet = pets.find((item) => item.id === reminder.petId)
+    if (!pet) {
+      setNotice('Choose a valid pet for the reminder.')
+      return
+    }
+
+    const normalized = {
+      ...reminder,
+      id: ensureUuid(reminder.id),
+      petId: pet.id,
+      petName: reminder.petName || pet.name,
+      type: reminder.type || 'vaccination',
+      title: reminder.title.trim(),
+      dueDate: reminder.dueDate || reminder.due || '',
+      due: reminder.dueDate || reminder.due || '',
+      notes: reminder.notes?.trim() || '',
+      completed: Boolean(reminder.completed),
+    }
+
+    const nextReminders = mergeById(reminders, normalized)
+    const nextCompletedCount = computeCompletedCount(nextReminders)
+
+    dispatch(setReminders(nextReminders))
+    dispatch(setCompletedCount(nextCompletedCount))
+    setModal(null)
+    setReminderDraft(null)
+
+    try {
+      await persistDashboard(pets, nextReminders, records, nextCompletedCount)
+      setNotice('Reminder saved.')
+    } catch {
+      setNotice('Reminder saved locally, but the Node API could not be reached.')
+    }
+  }
+
+  const toggleReminder = async (id) => {
+    const nextReminders = reminders.map((item) => (item.id === id ? { ...item, completed: !item.completed } : item))
+    const nextCompletedCount = computeCompletedCount(nextReminders)
+
+    dispatch(setReminders(nextReminders))
+    dispatch(setCompletedCount(nextCompletedCount))
+
+    try {
+      await persistDashboard(pets, nextReminders, records, nextCompletedCount)
+    } catch {
+      setNotice('Reminder updated locally, but the Node API could not be reached.')
+    }
+  }
+
+  const deleteReminder = async (id) => {
+    const nextReminders = reminders.filter((item) => item.id !== id)
+    const nextCompletedCount = computeCompletedCount(nextReminders)
+
+    dispatch(setReminders(nextReminders))
+    dispatch(setCompletedCount(nextCompletedCount))
+
+    try {
+      await persistDashboard(pets, nextReminders, records, nextCompletedCount)
+      setNotice('Reminder removed.')
+    } catch {
+      setNotice('Reminder removed locally, but the Node API could not be reached.')
+    }
+  }
+
+  const saveRecord = async (record) => {
+    if (!record?.petId) {
+      setNotice('Choose a pet for the health record.')
+      return
+    }
+
+    const pet = pets.find((item) => item.id === record.petId)
+    if (!pet) {
+      setNotice('Choose a valid pet for the health record.')
+      return
+    }
+
+    const normalized = {
+      ...record,
+      id: ensureUuid(record.id),
+      petId: pet.id,
+      petName: record.petName || pet.name,
+      type: record.type || 'vaccination',
+      title: record.title.trim(),
+      date: record.date || '',
+      description: record.description?.trim() || record.notes?.trim() || '',
+      notes: record.notes?.trim() || record.description?.trim() || '',
+      veterinarian: record.veterinarian?.trim() || '',
+      nextDueDate: record.nextDueDate || '',
+    }
+
+    const nextRecords = {
+      ...records,
+      [pet.id]: mergeById(records[pet.id] || [], normalized),
+    }
+
+    dispatch(setAllRecords(nextRecords))
+    setModal(null)
+    setRecordDraft(null)
+
+    try {
+      await persistDashboard(pets, reminders, nextRecords, completedCount)
+      setNotice('Health record saved.')
+    } catch {
+      setNotice('Health record saved locally, but the Node API could not be reached.')
+    }
+  }
+
+  const deleteRecord = async (recordId) => {
+    const match = locateRecord(records, recordId)
+    if (!match) return
+
+    const nextRecords = { ...records }
+    nextRecords[match.petId] = nextRecords[match.petId].filter((item) => item.id !== recordId)
+    if (nextRecords[match.petId].length === 0) delete nextRecords[match.petId]
+
+    dispatch(setAllRecords(nextRecords))
+
+    try {
+      await persistDashboard(pets, reminders, nextRecords, completedCount)
+      setNotice('Health record removed.')
+    } catch {
+      setNotice('Health record removed locally, but the Node API could not be reached.')
+    }
+  }
+
+  const removePet = async (pet) => {
+    if (!window.confirm(`Delete ${pet.name} and their health records?`)) return
+
+    const nextPets = pets.filter((item) => item.id !== pet.id)
+    const nextReminders = reminders.filter((item) => item.petId !== pet.id)
+    const nextRecords = { ...records }
+    delete nextRecords[pet.id]
+    const nextCompletedCount = computeCompletedCount(nextReminders)
+
+    dispatch(setPets(nextPets))
+    dispatch(setReminders(nextReminders))
+    dispatch(setAllRecords(nextRecords))
+    dispatch(setCompletedCount(nextCompletedCount))
+    navigate('/')
+
+    try {
+      await persistDashboard(nextPets, nextReminders, nextRecords, nextCompletedCount)
+      setNotice(`${pet.name} was deleted.`)
+    } catch {
+      setNotice('Pet removed locally, but the Node API could not be reached.')
+    }
   }
 
   const submitAuth = async (event) => {
     event.preventDefault()
-    if (!auth) {
-      setAuthError('Add your Firebase configuration in .env.local before using authentication.')
-      return
-    }
-    setAuthBusy(true)
     setAuthError('')
+
     try {
-      if (authMode === 'signup') {
-        const credential = await createUserWithEmailAndPassword(auth, authForm.email, authForm.password)
-        if (authForm.name.trim()) await updateProfile(credential.user, { displayName: authForm.name.trim() })
-        await persistDashboard([], [], {})
+      if (authMode === 'reset') {
+        await dispatch(requestPasswordReset(authForm.email)).unwrap()
+        setNotice('Check your inbox for the reset token and link.')
+      } else if (authMode === 'signup') {
+        await dispatch(registerUser({ name: authForm.name.trim(), email: authForm.email, password: authForm.password })).unwrap()
         setNotice('Your PawPal account is ready.')
-      } else if (authMode === 'reset') {
-        await sendPasswordResetEmail(auth, authForm.email)
-        setNotice('Check your inbox for a password reset link.')
       } else {
-        await signInWithEmailAndPassword(auth, authForm.email, authForm.password)
+        await dispatch(loginUser({ email: authForm.email, password: authForm.password })).unwrap()
         setNotice('Welcome back to PawPal!')
       }
+
       setAuthForm({ name: '', email: '', password: '' })
-      setAuthModal(false)
     } catch (error) {
-      const messages = {
-        'auth/email-already-in-use': 'An account already exists for this email.',
-        'auth/invalid-credential': 'Email or password is incorrect.',
-        'auth/weak-password': 'Use a password with at least 6 characters.',
-        'auth/invalid-email': 'Enter a valid email address.',
-        'auth/user-not-found': 'No account was found for that email.',
-        'auth/missing-email': 'Please provide an email address to reset your password.',
-        'auth/operation-not-allowed': 'Enable Email/Password sign-in in Firebase Authentication.',
-      }
-      setAuthError(messages[error.code] || 'Could not complete authentication. Please try again.')
-    } finally {
-      setAuthBusy(false)
+      setAuthError(error?.response?.data?.message || error?.message || 'Could not complete authentication. Please try again.')
     }
   }
 
-  const logout = async () => {
-    if (!auth) return
-    await signOut(auth)
-    setNotice('You have been logged out.')
+  const greeting = useMemo(() => `Good morning${user?.name ? `, ${user.name.split(' ')[0]}` : ''}!`, [user])
+
+  if (isResetRoute) {
+    return <ResetPasswordPage />
   }
 
-  const completeTask = async (id) => {
-    const task = tasks.find((item) => item.id === id)
-    const updatedTasks = tasks.filter((item) => item.id !== id)
-    const nextCompleted = completedCount + 1
-    setTasks(updatedTasks)
-    setCompletedCount(nextCompleted)
-    setNotice(`${task.title} marked as complete.`)
-
-    if (hasFirebaseConfig && auth?.currentUser && db) {
-      try {
-        await persistDashboard(pets, updatedTasks, healthRecords, nextCompleted)
-      } catch (error) {
-        setNotice(firebaseErrorMessage(error, `${task.title} completion`))
-      }
-    }
-  }
-
-  const addPet = async (event) => {
-    event.preventDefault()
-    const species = petForm.species === 'Cat' ? '🐈' : '🐕'
-    const colors = petForm.species === 'Cat' ? ['#bca4ed', '#d7c5a7', '#a9c7e8'] : ['#f9c66a', '#e6a980', '#b9d5b5']
-    const newPet = {
-      id: `pet-${Date.now()}`,
-      name: petForm.name.trim(),
-      breed: petForm.breed.trim() || `${petForm.species} companion`,
-      age: petForm.age.trim() || 'Age not set',
-      species: petForm.species,
-      gender: petForm.gender,
-      weight: petForm.weight,
-      weightUnit: petForm.weightUnit,
-      dateOfBirth: petForm.dateOfBirth,
-      microchipId: petForm.microchipId.trim(),
-      allergies: petForm.allergies,
-      medications: petForm.medications,
-      veterinarian: petForm.veterinarian,
-      icon: species,
-      color: petForm.color || colors[pets.length % colors.length],
-      status: 'Happy & healthy',
-    }
-    const updatedPets = [...pets, newPet]
-    setPets(updatedPets)
-    setSelectedPet(newPet.name)
-    setModal(null)
-    setPetForm(createEmptyPetForm())
-    setNotice(`${newPet.name} has been added to your family.`)
-    try { await persistDashboard(updatedPets, tasks, healthRecords) } catch (error) { setNotice(firebaseErrorMessage(error, `${newPet.name} addition`)) }
-  }
-
-  const editPet = async (event) => {
-    event.preventDefault()
-    if (!activePet) return
-    const updatedPet = {
-      ...activePet,
-      name: petForm.name.trim(),
-      breed: petForm.breed.trim() || `${petForm.species} companion`,
-      age: petForm.age.trim() || 'Age not set',
-      species: petForm.species,
-      gender: petForm.gender,
-      weight: petForm.weight,
-      weightUnit: petForm.weightUnit,
-      dateOfBirth: petForm.dateOfBirth,
-      microchipId: petForm.microchipId.trim(),
-      allergies: petForm.allergies,
-      medications: petForm.medications,
-      veterinarian: petForm.veterinarian,
-      color: petForm.color || activePet.color,
-      icon: petForm.species === 'Cat' ? '🐈' : '🐕',
-    }
-    const updatedPets = pets.map((pet) => pet.id === activePet.id ? updatedPet : pet)
-    const updatedTasks = tasks.map((task) => task.pet === activePet.name ? { ...task, pet: updatedPet.name } : task)
-    setPets(updatedPets)
-    setTasks(updatedTasks)
-    setSelectedPet(updatedPet.name)
-    setPetForm(createEmptyPetForm())
-    setModal(null)
-    setNotice(`${updatedPet.name}'s details were updated.`)
-    try { await persistDashboard(updatedPets, updatedTasks, healthRecords) } catch (error) { setNotice(firebaseErrorMessage(error, `${updatedPet.name}'s update`)) }
-  }
-
-  const deletePet = async () => {
-    if (!activePet || !window.confirm(`Delete ${activePet.name} and all of their reminders and health records?`)) return
-    const petKey = activePet.id || activePet.name
-    const updatedPets = pets.filter((pet) => pet.id !== activePet.id)
-    const updatedTasks = tasks.filter((task) => task.pet !== activePet.name)
-    const updatedRecords = { ...healthRecords }
-    delete updatedRecords[petKey]
-    const petName = activePet.name
-    setPets(updatedPets)
-    setTasks(updatedTasks)
-    setHealthRecords(updatedRecords)
-    setSelectedPet(updatedPets[0]?.name || '')
-    navigate('/')
-    setNotice(`${petName} and their records were deleted.`)
-    try { await persistDashboard(updatedPets, updatedTasks, updatedRecords) } catch (error) { setNotice(firebaseErrorMessage(error, `${petName}'s deletion`)) }
-    return true
-  }
-
-  const addReminder = async (event) => {
-    event.preventDefault()
-    const newReminder = { id: Date.now(), title: reminderForm.title.trim(), pet: reminderForm.pet, due: formatDueDate(reminderForm.due), icon: reminderForm.type, tone: reminderForm.type === '✂️' ? 'teal' : reminderForm.type === '🩺' ? 'purple' : 'orange' }
-    const updatedTasks = [...tasks, newReminder]
-    setTasks(updatedTasks)
-    setModal(null)
-    setReminderForm({ title: '', pet: pets[0]?.name || '', due: '', type: '💊' })
-    setNotice(`${newReminder.title} reminder added.`)
-    try { await persistDashboard(pets, updatedTasks, healthRecords) } catch (error) { setNotice(firebaseErrorMessage(error, `${newReminder.title} reminder`)) }
-  }
-
-  const addHealthRecord = async (event) => {
-    event.preventDefault()
-    if (!activePet) return
-    const petKey = activePet.id || activePet.name
-    const newRecord = {
-      id: `record-${Date.now()}`,
-      date: recordForm.date,
-      type: recordForm.type,
-      title: recordForm.title.trim(),
-      description: recordForm.description.trim(),
-      veterinarian: recordForm.veterinarian.trim(),
-      nextDueDate: recordForm.nextDueDate,
-    }
-    const updatedRecords = { ...healthRecords, [petKey]: [...(healthRecords[petKey] || []), newRecord] }
-    setHealthRecords(updatedRecords)
-    setModal(null)
-    setRecordForm(createEmptyRecordForm())
-    setNotice(`${newRecord.title} was added to ${activePet.name}'s health records.`)
-    try { await persistDashboard(pets, tasks, updatedRecords) } catch (error) { setNotice(firebaseErrorMessage(error, `${activePet.name}'s health record`)) }
-  }
-
-  const editHealthRecord = async (event) => {
-    event.preventDefault()
-    if (!activePet || !selectedHealthRecord) return
-    const petKey = activePet.id || activePet.name
-    const updatedRecord = {
-      ...selectedHealthRecord,
-      date: recordForm.date,
-      type: recordForm.type,
-      title: recordForm.title.trim(),
-      description: recordForm.description.trim(),
-      veterinarian: recordForm.veterinarian.trim(),
-      nextDueDate: recordForm.nextDueDate,
-    }
-    const updatedRecords = { ...healthRecords, [petKey]: (healthRecords[petKey] || []).map((record) => record.id === selectedHealthRecord.id ? updatedRecord : record) }
-    setHealthRecords(updatedRecords)
-    setSelectedHealthRecord(updatedRecord)
-    setModal(null)
-    setNotice(`${updatedRecord.title} was updated.`)
-    try { await persistDashboard(pets, tasks, updatedRecords) } catch (error) { setNotice(firebaseErrorMessage(error, `${activePet.name}'s health record update`)) }
-  }
-
-  const deleteHealthRecord = async () => {
-    if (!activePet || !selectedHealthRecord || !window.confirm(`Delete the health record “${selectedHealthRecord.title}”?`)) return
-    const petKey = activePet.id || activePet.name
-    const updatedRecords = { ...healthRecords, [petKey]: (healthRecords[petKey] || []).filter((record) => record.id !== selectedHealthRecord.id) }
-    const recordTitle = selectedHealthRecord.title
-    setHealthRecords(updatedRecords)
-    setSelectedHealthRecord(null)
-    setNotice(`${recordTitle} was deleted.`)
-    try { await persistDashboard(pets, tasks, updatedRecords) } catch (error) { setNotice(firebaseErrorMessage(error, `${activePet.name}'s health record deletion`)) }
-    return true
-  }
-
-  const activePet = pets.find((pet) => pet.name === selectedPet)
-  const activePetTasks = tasks.filter((task) => task.pet === selectedPet)
-  const activePetRecords = activePet ? [...(healthRecords[activePet.id || activePet.name] || [])].sort((a, b) => new Date(b.date) - new Date(a.date)) : []
-  const isLoggedIn = Boolean(authUser && !authUser.isAnonymous)
-
-  if (!isLoggedIn) {
+  if (!isAuthenticated) {
     return (
       <main className="pawpal-shell">
         <nav className="topbar">
-          <button className="brand" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} aria-label="PawPal home"><span className="brand-mark">🐾</span><span>PawPal</span></button>
-          <div className="auth-links"><button onClick={() => openAuth('login')}>Log in</button><button className="signup-button" onClick={() => openAuth('signup')}>Sign up</button></div>
+          <button className="brand" type="button">
+            <span className="brand-mark">🐾</span>
+            <span>PawPal</span>
+          </button>
         </nav>
         <section className="signed-out">
-          <span>🐾</span><p className="eyebrow">YOUR PRIVATE PET CARE SPACE</p><h1>Every pet has a home here.</h1><p>Log in to view and manage the pets, reminders, and care details saved only to your account.</p><div><button className="add-button" onClick={() => openAuth('signup')}>Create an account</button><button className="secondary-cta" onClick={() => openAuth('login')}>Log in</button></div>
-        </section>
-        {notice && <div className="toast" role="status">{notice}<button onClick={() => setNotice('')} aria-label="Dismiss">×</button></div>}
-        {authModal && <div className="modal-backdrop" role="presentation" onMouseDown={() => setAuthModal(false)}>
-          <form className="modal-card auth-card" onSubmit={submitAuth} onMouseDown={(event) => event.stopPropagation()}>
-            <div className="modal-heading"><div><p className="eyebrow">WELCOME TO PAWPAL</p><h2>{authMode === 'login' ? 'Log in' : authMode === 'signup' ? 'Create your account' : 'Reset password'}</h2></div><button type="button" className="close-button" onClick={() => setAuthModal(false)} aria-label="Close">×</button></div>
-            {authMode === 'signup' && <label>Your name<input required value={authForm.name} onChange={(event) => setAuthForm({ ...authForm, name: event.target.value })} placeholder="e.g. Sarah Mitchell" /></label>}
-            <label>Email<input required type="email" value={authForm.email} onChange={(event) => setAuthForm({ ...authForm, email: event.target.value })} placeholder="you@example.com" /></label>
-            {(authMode === 'login' || authMode === 'signup') && <label>Password<input required minLength="6" type="password" value={authForm.password} onChange={(event) => setAuthForm({ ...authForm, password: event.target.value })} placeholder="At least 6 characters" /></label>}
-            {authError && <p className="auth-error" role="alert">{authError}</p>}
-            <button className="add-button auth-submit" type="submit" disabled={authBusy}>{authBusy ? 'Please wait…' : authMode === 'login' ? 'Log in' : authMode === 'reset' ? 'Send reset link' : 'Create account'}</button>
-            <p className="auth-switch">{authMode === 'login' ? 'New to PawPal?' : authMode === 'signup' ? 'Already have an account?' : 'Remembered your password?'} <button type="button" onClick={() => { setAuthMode(authMode === 'login' ? 'signup' : authMode === 'signup' ? 'reset' : 'login'); setAuthError('') }}>{authMode === 'login' ? 'Sign up' : authMode === 'signup' ? 'Reset password' : 'Log in'}</button></p>
-            {authMode === 'login' && <p className="auth-footer"><button type="button" className="link-button" onClick={() => { setAuthMode('reset'); setAuthError('') }}>Forgot password?</button></p>}
+          <span>🐾</span>
+          <p className="eyebrow">YOUR PRIVATE PET CARE SPACE</p>
+          <h1>Every pet has a home here.</h1>
+          <p>Sign in to manage pets, reminders, and health details through your Node.js API.</p>
+          <form className="modal-card auth-card" onSubmit={submitAuth}>
+            {authMode === 'signup' && (
+              <label>
+                Your name
+                <input required value={authForm.name} onChange={(e) => setAuthForm({ ...authForm, name: e.target.value })} />
+              </label>
+            )}
+            <label>
+              Email
+              <input required type="email" value={authForm.email} onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })} />
+            </label>
+            {authMode !== 'reset' && (
+              <label>
+                Password
+                <input required minLength="6" type="password" value={authForm.password} onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })} />
+              </label>
+            )}
+            {authError && <p className="auth-error">{authError}</p>}
+            <button className="add-button auth-submit" disabled={authBusy}>
+              {authBusy ? 'Please wait…' : authMode === 'login' ? 'Log in' : authMode === 'signup' ? 'Create account' : 'Send reset link'}
+            </button>
+            <p className="auth-switch">
+              <button type="button" onClick={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')}>
+                {authMode === 'login' ? 'Create an account' : 'Log in'}
+              </button>
+              ·
+              <button type="button" onClick={() => navigate('/reset-password')}>Forgot password?</button>
+            </p>
           </form>
-        </div>}
+        </section>
+        {notice && (
+          <div className="toast">
+            {notice}
+            <button type="button" onClick={() => setNotice('')}>×</button>
+          </div>
+        )}
       </main>
     )
   }
@@ -581,132 +706,200 @@ function App() {
   return (
     <main className="pawpal-shell">
       <nav className="topbar">
-        <button className="brand" onClick={() => { navigate('/'); setActiveTab('Overview') }} aria-label="PawPal home">
-          <span className="brand-mark">🐾</span><span>PawPal</span>
+        <button className="brand" type="button" onClick={() => navigate('/')}>
+          <span className="brand-mark">🐾</span>
+          <span>PawPal</span>
         </button>
-        <div className="nav-links">
-          {['Overview', 'My Pets', 'Calendar'].map((item) => (
-            <button key={item} className={activeTab === item ? 'nav-link active' : 'nav-link'} onClick={() => openSection(item === 'My Pets' ? 'my-pets' : item === 'Calendar' ? 'calendar' : 'top')}>{item}</button>
-          ))}
+        <div className="profile">
+          <span className="avatar">{(user?.name || user?.email || 'P')[0].toUpperCase()}</span>
+          <span className="profile-name">{user?.name || user?.email}</span>
+          <button className="logout-button" type="button" onClick={() => dispatch(logoutUser())}>Log out</button>
         </div>
-        {authUser && !authUser.isAnonymous ? <div className="profile"><span className="avatar">{(authUser.displayName || authUser.email || 'P').slice(0, 1).toUpperCase()}</span><span className="profile-name">{authUser.displayName || authUser.email}</span><button className="logout-button" onClick={logout}>Log out</button></div> : <div className="auth-links"><button onClick={() => openAuth('login')}>Log in</button><button className="signup-button" onClick={() => openAuth('signup')}>Sign up</button></div>}
       </nav>
 
       <section className="welcome-row">
-        <div><p className="eyebrow">YOUR PET CARE COMPANION</p><h1>{greeting}</h1><p className="welcome-copy">Here’s what’s happening with your furry family today.</p></div>
-        <div className="header-actions"><span className={`sync-status ${firebaseStatus.startsWith('Synced') ? 'synced' : ''}`}>{firebaseStatus}</span><button className="add-button" onClick={() => { setPetForm(createEmptyPetForm()); setModal('pet') }}>+ Add a pet</button></div>
+        <div>
+          <p className="eyebrow">YOUR PET CARE COMPANION</p>
+          <h1>{greeting}</h1>
+          <p className="welcome-copy">Everything is managed through Redux Toolkit and ready for your Node.js backend.</p>
+        </div>
+        <div className="header-actions">
+          <span className={`sync-status ${dashboardStatus === 'ready' ? 'synced' : ''}`}>
+            {dashboardStatus === 'ready' ? 'Synced with API' : dashboardStatus === 'saving' ? 'Saving…' : 'API connection required'}
+          </span>
+          <button className="add-button" type="button" onClick={openPetModal}>+ Add a pet</button>
+        </div>
       </section>
 
-      {notice && <div className="toast" role="status">{notice}<button onClick={() => setNotice('')} aria-label="Dismiss">×</button></div>}
+      {notice && (
+        <div className="toast">
+          {notice}
+          <button type="button" onClick={() => setNotice('')}>×</button>
+        </div>
+      )}
 
       <Routes>
-        <Route path="/" element={
-          <>
-            <section className="summary-grid" aria-label="Pet care summary">
-              <div className="summary-card"><span className="summary-icon peach">🐾</span><div><strong>{pets.length}</strong><span>Pets in your family</span></div></div>
-              <div className="summary-card"><span className="summary-icon lavender">📅</span><div><strong>{tasks.length}</strong><span>Upcoming reminders</span></div></div>
-              <div className="summary-card"><span className="summary-icon mint">✓</span><div><strong>{completedCount}</strong><span>Tasks completed</span></div></div>
-            </section>
+        <Route
+          path="/"
+          element={(
+            <>
+              <section className="summary-grid">
+                <div className="summary-card">
+                  <span className="summary-icon peach">🐾</span>
+                  <div>
+                    <strong>{pets.length}</strong>
+                    <span>Pets in your family</span>
+                  </div>
+                </div>
+                <div className="summary-card">
+                  <span className="summary-icon lavender">📅</span>
+                  <div>
+                    <strong>{reminders.length}</strong>
+                    <span>Upcoming reminders</span>
+                  </div>
+                </div>
+                <div className="summary-card">
+                  <span className="summary-icon mint">✓</span>
+                  <div>
+                    <strong>{completedCount}</strong>
+                    <span>Tasks completed</span>
+                  </div>
+                </div>
+              </section>
 
-            <section className="content-grid">
-              <div className="panel pets-panel" id="my-pets">
-                <div className="panel-heading"><div><p className="eyebrow">YOUR COMPANIONS</p><h2>My pets</h2></div><button className="text-button" onClick={() => openSection('my-pets')}>View all <span>→</span></button></div>
-                <div className="pet-grid">
-                  {pets.map((pet) => <button className={`pet-card ${selectedPet === pet.name ? 'selected' : ''}`} key={pet.name} onClick={() => navigate(`/pets/${pet.id || pet.name}`)}>
-                    <span className="pet-art" style={{ background: pet.color }}>{pet.icon}</span><span className="pet-info"><strong>{pet.name}</strong><small>{pet.breed} · {pet.age}</small><em>{pet.status}</em></span><span className="arrow">→</span>
-                  </button>)}
+              <section className="content-grid">
+                <div className="panel pets-panel">
+                  <div className="panel-heading">
+                    <div>
+                      <p className="eyebrow">YOUR COMPANIONS</p>
+                      <h2>My pets</h2>
+                    </div>
+                  </div>
+                  <div className="pet-grid">
+                    {pets.length ? (
+                      pets.map((pet) => (
+                        <button className="pet-card" key={pet.id} type="button" onClick={() => navigate(`/pets/${pet.id}`)}>
+                          <span className="pet-art" style={{ background: pet.color }}>{pet.icon || petIcon(pet.species)}</span>
+                          <span className="pet-info">
+                            <strong>{pet.name}</strong>
+                            <small>{pet.breed} · {pet.age}</small>
+                            <em>{pet.status}</em>
+                          </span>
+                          <span className="arrow">→</span>
+                        </button>
+                      ))
+                    ) : (
+                      <p className="empty-copy">Add your first pet to get started.</p>
+                    )}
+                  </div>
                 </div>
-              </div>
-              <aside className="panel task-panel" id="calendar">
-                <div className="panel-heading"><div><p className="eyebrow">STAY ON TRACK</p><h2>Upcoming care</h2></div><button className="text-button" onClick={() => openSection('calendar')}>Calendar <span>→</span></button></div>
-                <div className="tasks">
-                  {tasks.length ? tasks.map((task) => <div className="task" key={task.id}><span className={`task-icon ${task.tone}`}>{task.icon}</span><div><strong>{task.title}</strong><small>{task.pet} · <b>{task.due}</b></small></div><button className="done-button" onClick={() => completeTask(task.id)} aria-label={`Complete ${task.title}`}>✓</button></div>) : <p className="empty">All caught up — nice work!</p>}
+
+                <div style={{ display: 'grid', gap: '1.5rem' }}>
+                  <div className="panel task-panel">
+                    <div className="panel-heading">
+                      <div>
+                        <p className="eyebrow">UP NEXT</p>
+                        <h2>Care reminders</h2>
+                      </div>
+                      <button className="text-button" type="button" onClick={() => openReminderModal()}>
+                        Add reminder <span>→</span>
+                      </button>
+                    </div>
+                    <div className="tasks">
+                      <ReminderList reminders={reminders} onToggle={toggleReminder} onDelete={deleteReminder} />
+                    </div>
+                  </div>
+
+                  <div className="panel">
+                    <div className="panel-heading">
+                      <div>
+                        <p className="eyebrow">HEALTH LOG</p>
+                        <h2>Health records</h2>
+                      </div>
+                      <button className="text-button" type="button" onClick={() => openRecordModal()}>
+                        Add record <span>→</span>
+                      </button>
+                    </div>
+                    <div className="tasks">
+                      <HealthRecordList records={allRecords} onEdit={openRecordEditor} onDelete={deleteRecord} />
+                    </div>
+                  </div>
                 </div>
-                <button className="reminder-button" onClick={() => { setReminderForm((current) => ({ ...current, pet: pets[0]?.name || '' })); setModal('reminder') }}>+ Add reminder</button>
-              </aside>
-            </section>
-            <section className="tip-card"><span>💡</span><div><p className="eyebrow">PAWPAL TIP</p><h3>A little consistency goes a long way.</h3><p>Keep health records and reminders together so every member of the family can give the best care.</p></div><button onClick={() => setNotice('Health records opened.')}>View health records →</button></section>
-          </>
-        } />
-        <Route path="/pets/:petKey" element={
-          <PetDetailPage pets={pets} tasks={tasks} healthRecords={healthRecords} setSelectedPet={setSelectedPet} setModal={setModal} setPetForm={setPetForm} setReminderForm={setReminderForm} setHealthCardPet={setHealthCardPet} onDeletePet={deletePet} />
-        } />
-        <Route path="/pets/:petKey/records/:recordId" element={
-          <HealthRecordDetailPage pets={pets} healthRecords={healthRecords} setModal={setModal} setRecordForm={setRecordForm} setSelectedHealthRecord={setSelectedHealthRecord} onDeleteRecord={deleteHealthRecord} />
-        } />
+              </section>
+            </>
+          )}
+        />
+        <Route path="/documents" element={<DocumentsPage />} />
+        <Route
+          path="/pets/:petId"
+          element={(
+            <PetPage
+              pets={pets}
+              reminders={reminders}
+              records={records}
+              onRemovePet={removePet}
+              onOpenReminder={openReminderModal}
+              onOpenRecord={openRecordModal}
+              onToggleReminder={toggleReminder}
+              onDeleteReminder={deleteReminder}
+              onEditRecord={openRecordEditor}
+              onDeleteRecord={deleteRecord}
+            />
+          )}
+        />
       </Routes>
 
-      {modal === 'health-card' && healthCardPet && <div className="modal-backdrop" role="presentation" onMouseDown={() => setModal(null)}>
-        <section className="modal-card emergency-card" onMouseDown={(event) => event.stopPropagation()} aria-label={`${healthCardPet.name} emergency health card`}>
-          <div className="modal-heading"><div><p className="eyebrow">EMERGENCY PET PROFILE</p><h2>{healthCardPet.icon} {healthCardPet.name}</h2></div><button type="button" className="close-button" onClick={() => setModal(null)} aria-label="Close">×</button></div>
-          <p className="emergency-card-note">Keep this screen available for veterinary emergencies. It contains no uploaded files or public sharing link.</p>
-          <div className="record-detail-grid">
-            <div><span>Species & breed</span><strong>{healthCardPet.species || 'Pet'} · {healthCardPet.breed || 'Not recorded'}</strong></div>
-            <div><span>Microchip</span><strong>{healthCardPet.microchipId || 'Not recorded'}</strong></div>
-            <div><span>Allergies</span><strong>{healthCardPet.allergies?.length ? healthCardPet.allergies.join(', ') : 'No known allergies'}</strong></div>
-            <div><span>Active medication</span><strong>{healthCardPet.medications?.length ? healthCardPet.medications.join(', ') : 'None recorded'}</strong></div>
-            <div><span>Veterinarian</span><strong>{healthCardPet.veterinarian?.name || 'Not recorded'}</strong></div>
-            <div><span>Vet phone</span><strong>{healthCardPet.veterinarian?.phone || 'Not recorded'}</strong></div>
-          </div>
-          <div className="modal-actions"><button className="cancel-button" onClick={() => setModal(null)}>Close</button><button className="add-button" onClick={() => window.print()}>Print card</button></div>
-        </section>
-      </div>}
+      {modal === 'pet' && (
+        <div className="modal-backdrop" onMouseDown={() => setModal(null)}>
+          <form className="modal-card" onSubmit={savePet} onMouseDown={(e) => e.stopPropagation()}>
+            <div className="modal-heading">
+              <h2>Add a pet</h2>
+              <button type="button" className="close-button" onClick={() => setModal(null)}>×</button>
+            </div>
+            <label>
+              Name
+              <input required value={petForm.name} onChange={(e) => setPetForm({ ...petForm, name: e.target.value })} />
+            </label>
+            <label>
+              Species
+              <select value={petForm.species} onChange={(e) => setPetForm({ ...petForm, species: e.target.value })}>
+                <option>Dog</option>
+                <option>Cat</option>
+                <option>Bird</option>
+              </select>
+            </label>
+            <label>
+              Breed
+              <input value={petForm.breed} onChange={(e) => setPetForm({ ...petForm, breed: e.target.value })} />
+            </label>
+            <label>
+              Age
+              <input value={petForm.age} onChange={(e) => setPetForm({ ...petForm, age: e.target.value })} />
+            </label>
+            <button className="add-button" type="submit">Save pet</button>
+          </form>
+        </div>
+      )}
 
-      {modal && modal !== 'health-card' && <div className="modal-backdrop" role="presentation" onMouseDown={() => setModal(null)}>
-        <form className="modal-card" onSubmit={modal === 'pet' ? addPet : modal === 'edit-pet' ? editPet : modal === 'reminder' ? addReminder : modal === 'edit-record' ? editHealthRecord : addHealthRecord} onMouseDown={(event) => event.stopPropagation()}>
-          <div className="modal-heading"><div><p className="eyebrow">PAWPAL</p><h2>{modal === 'pet' ? 'Add a pet' : modal === 'edit-pet' ? 'Edit pet' : modal === 'reminder' ? 'Add a reminder' : modal === 'edit-record' ? 'Edit health record' : 'Add health record'}</h2></div><button type="button" className="close-button" onClick={() => setModal(null)} aria-label="Close">×</button></div>
-          {modal === 'pet' || modal === 'edit-pet' ? <>
-            <label>Name<input required value={petForm.name} onChange={(event) => setPetForm({ ...petForm, name: event.target.value })} placeholder="e.g. Bailey" /></label>
-            <label>Species<select value={petForm.species} onChange={(event) => setPetForm({ ...petForm, species: event.target.value })}><option>Dog</option><option>Cat</option></select></label>
-            <label>Breed<input value={petForm.breed} onChange={(event) => setPetForm({ ...petForm, breed: event.target.value })} placeholder="e.g. Golden Retriever" /></label>
-            <label>Age<input value={petForm.age} onChange={(event) => setPetForm({ ...petForm, age: event.target.value })} placeholder="e.g. 2 years" /></label>
-            <label>Gender<select value={petForm.gender} onChange={(event) => setPetForm({ ...petForm, gender: event.target.value })}><option>Male</option><option>Female</option><option>Unknown</option></select></label>
-            <label>Date of birth<input type="date" value={petForm.dateOfBirth} onChange={(event) => setPetForm({ ...petForm, dateOfBirth: event.target.value })} /></label>
-            <label>Weight<input type="number" min="0" step="0.1" value={petForm.weight} onChange={(event) => setPetForm({ ...petForm, weight: event.target.value })} placeholder="e.g. 12.5" /></label>
-            <label>Weight unit<select value={petForm.weightUnit} onChange={(event) => setPetForm({ ...petForm, weightUnit: event.target.value })}><option value="kg">kg</option><option value="lb">lb</option></select></label>
-            <label>Microchip ID<input value={petForm.microchipId} onChange={(event) => setPetForm({ ...petForm, microchipId: event.target.value })} placeholder="Optional" /></label>
-            <label>Allergies<input value={petForm.allergies.join(', ')} onChange={(event) => setPetForm({ ...petForm, allergies: event.target.value.split(',').map((item) => item.trim()).filter(Boolean) })} placeholder="e.g. Chicken, pollen" /></label>
-            <label>Active medications<input value={petForm.medications.join(', ')} onChange={(event) => setPetForm({ ...petForm, medications: event.target.value.split(',').map((item) => item.trim()).filter(Boolean) })} placeholder="e.g. Heartgard" /></label>
-            <label>Veterinarian<input value={petForm.veterinarian.name} onChange={(event) => setPetForm({ ...petForm, veterinarian: { ...petForm.veterinarian, name: event.target.value } })} placeholder="e.g. Dr. Ahmed" /></label>
-            <label>Clinic<input value={petForm.veterinarian.clinic} onChange={(event) => setPetForm({ ...petForm, veterinarian: { ...petForm.veterinarian, clinic: event.target.value } })} placeholder="Clinic name" /></label>
-            <label>Vet phone<input type="tel" value={petForm.veterinarian.phone} onChange={(event) => setPetForm({ ...petForm, veterinarian: { ...petForm.veterinarian, phone: event.target.value } })} placeholder="Emergency contact number" /></label>
-          </> : modal === 'reminder' ? <>
-            <label>Reminder<input required value={reminderForm.title} onChange={(event) => setReminderForm({ ...reminderForm, title: event.target.value })} placeholder="e.g. Vet checkup" /></label>
-          <label>Pet<select value={reminderForm.pet} onChange={(event) => setReminderForm({ ...reminderForm, pet: event.target.value })}>{pets.map((pet) => <option key={pet.id || pet.name}>{pet.name}</option>)}</select></label>
-            <label>Due date<input type="date" required value={reminderForm.due} onChange={(event) => setReminderForm({ ...reminderForm, due: event.target.value })} /></label>
-            <label>Care type<select value={reminderForm.type} onChange={(event) => setReminderForm({ ...reminderForm, type: event.target.value })}><option value="💊">Medication</option><option value="🩺">Checkup</option><option value="✂️">Grooming</option></select></label>
-          </> : <>
-            <label>Date<input required type="date" value={recordForm.date} onChange={(event) => setRecordForm({ ...recordForm, date: event.target.value })} /></label>
-            <label>Record type<select value={recordForm.type} onChange={(event) => setRecordForm({ ...recordForm, type: event.target.value })}><option>Vaccination</option><option>Vet Visit</option><option>Medication</option><option>Allergy</option><option>Grooming</option></select></label>
-            <label>Title<input required value={recordForm.title} onChange={(event) => setRecordForm({ ...recordForm, title: event.target.value })} placeholder="e.g. Rabies Vaccine" /></label>
-            <label>Description<textarea value={recordForm.description} onChange={(event) => setRecordForm({ ...recordForm, description: event.target.value })} placeholder="Treatment notes or observations" /></label>
-            <label>Veterinarian<input value={recordForm.veterinarian} onChange={(event) => setRecordForm({ ...recordForm, veterinarian: event.target.value })} placeholder="e.g. Dr. Ahmed" /></label>
-            <label>Next due date<input type="date" value={recordForm.nextDueDate} onChange={(event) => setRecordForm({ ...recordForm, nextDueDate: event.target.value })} /></label>
-          </>}
-          <div className="modal-actions"><button type="button" className="cancel-button" onClick={() => setModal(null)}>Cancel</button><button className="add-button" type="submit">{modal === 'pet' ? 'Add pet' : modal === 'edit-pet' ? 'Save changes' : modal === 'reminder' ? 'Add reminder' : modal === 'edit-record' ? 'Save changes' : 'Add record'}</button></div>
-        </form>
-      </div>}
+      {modal === 'reminder' && (
+        <ReminderForm
+          key={reminderDraft?.id || reminderDraft?.petId || 'new-reminder'}
+          reminder={reminderDraft || undefined}
+          pets={pets}
+          onSubmit={saveReminder}
+          onCancel={() => { setModal(null); setReminderDraft(null) }}
+        />
+      )}
 
-      {authModal && <div className="modal-backdrop" role="presentation" onMouseDown={() => setAuthModal(false)}>
-        <form className="modal-card auth-card" onSubmit={submitAuth} onMouseDown={(event) => event.stopPropagation()}>
-          <div className="modal-heading"><div><p className="eyebrow">WELCOME TO PAWPAL</p><h2>{authMode === 'login' ? 'Log in' : authMode === 'signup' ? 'Create your account' : 'Reset password'}</h2></div><button type="button" className="close-button" onClick={() => setAuthModal(false)} aria-label="Close">×</button></div>
-          {authMode === 'signup' && <label>Your name<input required value={authForm.name} onChange={(event) => setAuthForm({ ...authForm, name: event.target.value })} placeholder="e.g. Sarah Mitchell" /></label>}
-          <label>Email<input required type="email" value={authForm.email} onChange={(event) => setAuthForm({ ...authForm, email: event.target.value })} placeholder="you@example.com" /></label>
-          {(authMode === 'login' || authMode === 'signup') && <label>Password<input required minLength="6" type="password" value={authForm.password} onChange={(event) => setAuthForm({ ...authForm, password: event.target.value })} placeholder="At least 6 characters" /></label>}
-          {authError && <p className="auth-error" role="alert">{authError}</p>}
-          <button className="add-button auth-submit" type="submit" disabled={authBusy}>{authBusy ? 'Please wait…' : authMode === 'login' ? 'Log in' : authMode === 'reset' ? 'Send reset link' : 'Create account'}</button>
-          <p className="auth-switch">
-            {authMode === 'login' ? 'New to PawPal?' : authMode === 'signup' ? 'Already have an account?' : 'Remembered your password?'}
-            <button type="button" onClick={() => {
-              setAuthMode(authMode === 'login' ? 'signup' : authMode === 'signup' ? 'reset' : 'login')
-              setAuthError('')
-            }}>
-              {authMode === 'login' ? 'Sign up' : authMode === 'signup' ? 'Reset password' : 'Log in'}
-            </button>
-          </p>
-          {authMode === 'login' && <p className="auth-footer"><button type="button" className="link-button" onClick={() => { setAuthMode('reset'); setAuthError('') }}>Forgot password?</button></p>}
-        </form>
-      </div>}
+      {modal === 'record' && (
+        <HealthRecordForm
+          key={recordDraft?.id || recordDraft?.petId || 'new-record'}
+          record={recordDraft || undefined}
+          pets={pets}
+          onSubmit={saveRecord}
+          onCancel={() => { setModal(null); setRecordDraft(null) }}
+        />
+      )}
     </main>
   )
 }

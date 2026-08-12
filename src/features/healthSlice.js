@@ -1,40 +1,28 @@
-import { createSlice } from '@reduxjs/toolkit';
-import { mockHealthRecords } from '../api/mockData';
-
-const initialState = {
-  records: mockHealthRecords, // keyed by petId → array of records
-};
+import { createSlice } from '@reduxjs/toolkit'
 
 const healthSlice = createSlice({
   name: 'health',
-  initialState,
+  initialState: { records: {} },
   reducers: {
+    setAllRecords(state, action) { state.records = action.payload },
     addRecord(state, action) {
-      const { petId, record } = action.payload;
-      if (!state.records[petId]) state.records[petId] = [];
-      state.records[petId].push(record);
+      const { petId, record } = action.payload
+      if (!state.records[petId]) state.records[petId] = []
+      state.records[petId].push(record)
     },
     updateRecord(state, action) {
-      const { petId, record } = action.payload;
-      const list = state.records[petId];
-      if (list) {
-        const idx = list.findIndex((r) => r.id === record.id);
-        if (idx !== -1) list[idx] = { ...list[idx], ...record };
-      }
+      const { petId, record } = action.payload
+      const index = state.records[petId]?.findIndex((item) => item.id === record.id)
+      if (index >= 0) state.records[petId][index] = { ...state.records[petId][index], ...record }
     },
     removeRecord(state, action) {
-      const { petId, recordId } = action.payload;
-      if (state.records[petId]) {
-        state.records[petId] = state.records[petId].filter((r) => r.id !== recordId);
-      }
+      const { petId, recordId } = action.payload
+      if (state.records[petId]) state.records[petId] = state.records[petId].filter((record) => record.id !== recordId)
     },
-    setRecords(state, action) {
-      const { petId, records } = action.payload;
-      state.records[petId] = records;
-    },
+    setRecords(state, action) { state.records[action.payload.petId] = action.payload.records },
   },
-});
+})
 
-export const { addRecord, updateRecord, removeRecord, setRecords } = healthSlice.actions;
-export const selectRecordsByPet = (petId) => (state) => state.health.records[petId] || [];
-export default healthSlice.reducer;
+export const { setAllRecords, addRecord, updateRecord, removeRecord, setRecords } = healthSlice.actions
+export const selectRecordsByPet = (petId) => (state) => state.health.records[petId] || []
+export default healthSlice.reducer

@@ -1,8 +1,6 @@
 import { createSlice } from '@reduxjs/toolkit';
-import { mockPets } from '../api/mockData';
-
 const initialState = {
-  list: mockPets,
+  list: [],
   loading: false,
   error: null,
 };

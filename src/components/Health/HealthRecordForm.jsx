@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { generateId } from '../../utils/helpers';
 
 const emptyRecord = {
+  petId: '',
+  petName: '',
   type: 'vaccination',
   title: '',
   date: '',
@@ -10,12 +12,18 @@ const emptyRecord = {
   notes: '',
 };
 
-export default function HealthRecordForm({ onSubmit, onCancel, record }) {
+export default function HealthRecordForm({ onSubmit, onCancel, record, pets }) {
   const isEdit = !!record;
   const [form, setForm] = useState(record || { ...emptyRecord });
 
   const handleChange = (e) => {
     const { name, value } = e.target;
+    if (name === 'petId') {
+      const pet = pets.find((item) => item.id === value);
+      setForm((f) => ({ ...f, petId: value, petName: pet ? pet.name : '' }));
+      return;
+    }
+
     setForm((f) => ({ ...f, [name]: value }));
   };
 
@@ -29,11 +37,22 @@ export default function HealthRecordForm({ onSubmit, onCancel, record }) {
       <div className="modal-content slide-up" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2>{isEdit ? 'Edit Record' : 'Add Health Record'}</h2>
-          <button className="modal-close" onClick={onCancel} aria-label="Close">✕</button>
+          <button type="button" className="modal-close" onClick={onCancel} aria-label="Close">✕</button>
         </div>
         <form onSubmit={handleSubmit}>
           <div className="modal-body">
             <div className="form-grid">
+              <div className="form-group">
+                <label className="form-label">Pet *</label>
+                <select className="form-select" name="petId" value={form.petId} onChange={handleChange} required>
+                  <option value="">Select a pet</option>
+                  {pets.map((pet) => (
+                    <option key={pet.id} value={pet.id}>
+                      {pet.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <div className="form-group">
                 <label className="form-label">Type</label>
                 <select className="form-select" name="type" value={form.type} onChange={handleChange}>
@@ -68,8 +87,12 @@ export default function HealthRecordForm({ onSubmit, onCancel, record }) {
             </div>
           </div>
           <div className="modal-footer">
-            <button type="button" className="btn btn-secondary" onClick={onCancel}>Cancel</button>
-            <button type="submit" className="btn btn-primary">{isEdit ? 'Save' : 'Add Record'}</button>
+            <button type="button" className="btn btn-secondary" onClick={onCancel}>
+              Cancel
+            </button>
+            <button type="submit" className="btn btn-primary">
+              {isEdit ? 'Save' : 'Add Record'}
+            </button>
           </div>
         </form>
       </div>

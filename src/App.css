@@ -987,6 +987,150 @@ h3 {
   font-weight: 700;
 }
 
+.documents-page {
+  margin-top: 1.5rem;
+  display: grid;
+  gap: 1.5rem;
+}
+
+.documents-hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 1.5rem;
+}
+
+.documents-copy {
+  margin: 0.75rem 0 0;
+  max-width: 42rem;
+  color: var(--text-secondary);
+}
+
+.documents-stats {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.documents-stat {
+  min-width: 120px;
+  padding: 1rem 1.1rem;
+  border-radius: var(--radius-xl);
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+}
+
+.documents-stat strong {
+  display: block;
+  font-family: var(--font-family-display);
+  font-size: 1.8rem;
+  color: var(--text-strong);
+}
+
+.documents-stat small {
+  color: var(--text-secondary);
+}
+
+.documents-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.9fr) minmax(0, 1.1fr);
+  gap: 1.5rem;
+}
+
+.documents-form,
+.documents-list-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.documents-form label {
+  display: grid;
+  gap: 0.4rem;
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.documents-form input,
+.documents-form select,
+.documents-form textarea {
+  width: 100%;
+  padding: 0.95rem 1rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.documents-form textarea {
+  resize: vertical;
+}
+
+.documents-empty-note {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+}
+
+.document-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.document-card {
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: 1.1rem;
+  display: grid;
+  gap: 0.85rem;
+}
+
+.document-card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.85rem;
+}
+
+.document-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 1rem;
+  display: grid;
+  place-items: center;
+  background: var(--surface-soft);
+  font-size: 1.05rem;
+}
+
+.document-card h4 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.document-card p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.document-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem 1rem;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+
+.document-notes {
+  line-height: 1.7;
+}
+
+.document-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
 .modal-backdrop {
   place-items: start center;
 }
@@ -1010,7 +1154,9 @@ h3 {
   .content-grid,
   .detail-grid,
   .health-record-list,
-  .record-detail-grid {
+  .record-detail-grid,
+  .documents-grid,
+  .documents-hero {
     grid-template-columns: 1fr;
   }
 
@@ -1057,6 +1203,11 @@ h3 {
 
   .summary-grid {
     grid-template-columns: 1fr;
+  }
+
+  .document-actions {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .tip-card {

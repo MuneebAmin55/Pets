@@ -38,7 +38,17 @@ export const getInitials = (name) =>
     .toUpperCase()
     .slice(0, 2);
 
-export const generateId = () => `id_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+export const generateId = () => {
+  if (globalThis.crypto?.randomUUID) {
+    return globalThis.crypto.randomUUID();
+  }
+
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
+    const random = (Math.random() * 16) | 0;
+    const value = char === 'x' ? random : (random & 0x3) | 0x8;
+    return value.toString(16);
+  });
+};
 
 export const getReminderTypeColor = (type) => {
   const map = {
