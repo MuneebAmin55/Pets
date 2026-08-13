@@ -27,6 +27,11 @@ export const registerUser = createAsyncThunk('user/registerUser', async (details
   return sessionUser(data)
 })
 
+export const loginWithGoogle = createAsyncThunk('user/loginWithGoogle', async (idToken) => {
+  const { data } = await authApi.google(idToken)
+  return sessionUser(data)
+})
+
 export const requestPasswordReset = createAsyncThunk('user/requestPasswordReset', async (email) => {
   await authApi.requestPasswordReset(email)
 })

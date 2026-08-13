@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import { Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { selectPets, setPets } from './features/petsSlice'
 import { selectReminders, setReminders } from './features/reminderSlice'
 import { setAllRecords } from './features/healthSlice'
-import { completePasswordReset, loginUser, logout as logoutUser, registerUser, requestPasswordReset, selectAuthLoading, selectIsAuth, selectUser, verifyPasswordResetOtp } from './features/userSlice'
+import { completePasswordReset, loginUser, loginWithGoogle, logout as logoutUser, registerUser, requestPasswordReset, selectAuthLoading, selectIsAuth, selectUser, verifyPasswordResetOtp } from './features/userSlice'
 import { loadDashboard, saveDashboard, selectCompletedCount, selectDashboardStatus, setCompletedCount } from './features/dashboardSlice'
 import ReminderForm from './components/Reminder/ReminderForm'
 import ReminderList from './components/Reminder/ReminderList'
@@ -34,6 +34,29 @@ const isUuid = (value) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
 
 const ensureUuid = (value) => (isUuid(value) ? value : crypto.randomUUID())
+
+const loadGoogleIdentityScript = () => new Promise((resolve, reject) => {
+  if (window.google?.accounts?.id) {
+    resolve()
+    return
+  }
+
+  const existingScript = document.getElementById('google-identity-services')
+  if (existingScript) {
+    existingScript.addEventListener('load', resolve, { once: true })
+    existingScript.addEventListener('error', reject, { once: true })
+    return
+  }
+
+  const script = document.createElement('script')
+  script.id = 'google-identity-services'
+  script.src = 'https://accounts.google.com/gsi/client'
+  script.async = true
+  script.defer = true
+  script.onload = resolve
+  script.onerror = reject
+  document.head.appendChild(script)
+})
 
 const normalizeReminder = (reminder, pets = []) => {
   const dueDate = reminder.dueDate || reminder.due || ''
@@ -374,6 +397,8 @@ function App() {
   const [petForm, setPetForm] = useState(emptyPet)
   const [reminderDraft, setReminderDraft] = useState(null)
   const [recordDraft, setRecordDraft] = useState(null)
+  const googleButtonRef = useRef(null)
+  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
   const isResetRoute = location.pathname === '/reset-password'
 
   const allRecords = useMemo(
@@ -408,6 +433,55 @@ function App() {
         setNotice('Unable to load your dashboard. Check that the Node API is running.')
       })
   }, [dispatch, isAuthenticated])
+
+  useEffect(() => {
+    if (isAuthenticated || isResetRoute || !googleClientId || !googleButtonRef.current) return
+
+    let cancelled = false
+    const buttonTarget = googleButtonRef.current
+    buttonTarget.innerHTML = ''
+
+    loadGoogleIdentityScript()
+      .then(() => {
+        if (cancelled || !window.google?.accounts?.id || !googleButtonRef.current) return
+
+        window.google.accounts.id.initialize({
+          client_id: googleClientId,
+          callback: async ({ credential }) => {
+            if (!credential) {
+              setAuthError('Google did not return a sign-in credential.')
+              return
+            }
+
+            setAuthError('')
+            try {
+              await dispatch(loginWithGoogle(credential)).unwrap()
+              setAuthForm({ name: '', email: '', password: '' })
+              setNotice('Welcome back to PawPal!')
+            } catch (error) {
+              setAuthError(error?.response?.data?.message || error?.message || 'Google sign-in failed. Please try again.')
+            }
+          },
+        })
+
+        window.google.accounts.id.renderButton(googleButtonRef.current, {
+          theme: 'outline',
+          size: 'large',
+          type: 'standard',
+          text: authMode === 'signup' ? 'signup_with' : 'signin_with',
+          shape: 'pill',
+          width: Math.min(360, Math.max(240, googleButtonRef.current.offsetWidth || 320)),
+        })
+      })
+      .catch(() => {
+        if (!cancelled) setAuthError('Google sign-in could not be loaded.')
+      })
+
+    return () => {
+      cancelled = true
+      buttonTarget.innerHTML = ''
+    }
+  }, [authMode, dispatch, googleClientId, isAuthenticated, isResetRoute])
 
   const openPetModal = () => {
     setPetForm(emptyPet())
@@ -684,8 +758,16 @@ function App() {
             <button className="add-button auth-submit" disabled={authBusy}>
               {authBusy ? 'Please wait…' : authMode === 'login' ? 'Log in' : authMode === 'signup' ? 'Create account' : 'Send reset link'}
             </button>
+            {googleClientId ? (
+              <div className="google-auth-area">
+                <span>or</span>
+                <div ref={googleButtonRef} className="google-auth-button" />
+              </div>
+            ) : (
+              <p className="auth-help">Add VITE_GOOGLE_CLIENT_ID to enable Google sign-in.</p>
+            )}
             <p className="auth-switch">
-              <button type="button" onClick={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')}>
+              <button type="button" onClick={() => { setAuthMode(authMode === 'login' ? 'signup' : 'login'); setAuthError('') }}>
                 {authMode === 'login' ? 'Create an account' : 'Log in'}
               </button>
               ·

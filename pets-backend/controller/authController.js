@@ -6,6 +6,38 @@ import User from "../models/User.js";
 
 const publicUser = (user) => ({ id: user.id, name: user.name, email: user.email });
 const signToken = (user) => jwt.sign({ id: user.id, email: user.email }, process.env.JWT_SECRET, { expiresIn: "1d" });
+const googleTokenInfoUrl = "https://oauth2.googleapis.com/tokeninfo";
+
+const verifyGoogleIdToken = async (idToken) => {
+    if (!process.env.GOOGLE_CLIENT_ID) {
+        throw new Error("GOOGLE_CLIENT_ID is not configured");
+    }
+
+    const response = await fetch(`${googleTokenInfoUrl}?${new URLSearchParams({ id_token: idToken })}`);
+
+    if (!response.ok) {
+        throw new Error("Invalid Google credential");
+    }
+
+    const payload = await response.json();
+    const emailVerified = payload.email_verified === true || payload.email_verified === "true";
+
+    if (
+        payload.aud !== process.env.GOOGLE_CLIENT_ID ||
+        !["accounts.google.com", "https://accounts.google.com"].includes(payload.iss) ||
+        !payload.sub ||
+        !payload.email ||
+        !emailVerified
+    ) {
+        throw new Error("Invalid Google credential");
+    }
+
+    return {
+        googleId: payload.sub,
+        email: payload.email.toLowerCase(),
+        name: payload.name || payload.given_name || payload.email.split("@")[0]
+    };
+};
 
 const createMailTransport = () =>
     nodemailer.createTransport({
@@ -79,6 +111,12 @@ export const login = async (req, res) => {
         }
 
         // Check password
+        if (!user.password) {
+            return res.status(401).json({
+                message: "This account uses Google sign-in"
+            });
+        }
+
         const passwordMatch = await bcrypt.compare(
             password,
             user.password
@@ -101,6 +139,44 @@ export const login = async (req, res) => {
             message: "Login failed",
             error: error.message
         });
+    }
+};
+
+export const googleLogin = async (req, res) => {
+    try {
+        const { idToken } = req.body;
+
+        if (!idToken) {
+            return res.status(400).json({ message: "Google credential is required" });
+        }
+
+        const googleProfile = await verifyGoogleIdToken(idToken);
+        let user = await User.findOne({ where: { email: googleProfile.email } });
+
+        if (user) {
+            const updates = {};
+            if (!user.googleId) updates.googleId = googleProfile.googleId;
+            if (!user.name) updates.name = googleProfile.name;
+            if (user.authProvider !== "google") updates.authProvider = user.password ? "local,google" : "google";
+            if (Object.keys(updates).length) user = await user.update(updates);
+        } else {
+            user = await User.create({
+                name: googleProfile.name,
+                email: googleProfile.email,
+                password: null,
+                googleId: googleProfile.googleId,
+                authProvider: "google"
+            });
+        }
+
+        return res.status(200).json({
+            message: "Google login successful",
+            token: signToken(user),
+            user: publicUser(user)
+        });
+    } catch (error) {
+        console.error("Google login error:", error.message);
+        return res.status(401).json({ message: "Google sign-in failed" });
     }
 };
 

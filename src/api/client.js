@@ -15,6 +15,7 @@ api.interceptors.request.use((config) => {
 export const authApi = {
   login: (credentials) => api.post('/auth/login', credentials),
   register: (details) => api.post('/auth/register', details),
+  google: (idToken) => api.post('/auth/google', { idToken }),
   requestPasswordReset: (email) => api.post('/auth/password-reset', { email }),
   verifyPasswordResetOtp: (payload) => api.post('/auth/password-reset/verify', payload),
   completePasswordReset: (payload) => api.post('/auth/password-reset/complete', payload),
