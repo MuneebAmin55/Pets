@@ -7,6 +7,7 @@ import User from "../models/User.js";
 const publicUser = (user) => ({ id: user.id, name: user.name, email: user.email });
 const signToken = (user) => jwt.sign({ id: user.id, email: user.email }, process.env.JWT_SECRET, { expiresIn: "1d" });
 const googleTokenInfoUrl = "https://oauth2.googleapis.com/tokeninfo";
+const normalizeEmail = (email) => String(email || "").trim().toLowerCase();
 
 const verifyGoogleIdToken = async (idToken) => {
     if (!process.env.GOOGLE_CLIENT_ID) {
@@ -53,14 +54,15 @@ const createMailTransport = () =>
 export const register = async (req, res) => {
     try {
         const { name, email, password } = req.body;
+        const normalizedEmail = normalizeEmail(email);
 
-        if (!name || !email || !password || password.length < 6) {
+        if (!name || !normalizedEmail || !password || password.length < 6) {
             return res.status(400).json({ message: "Name, valid email, and a password of at least 6 characters are required" });
         }
 
       
         const existingUser = await User.findOne({
-            where: { email }
+            where: { email: normalizedEmail }
         });
 
         if (existingUser) {
@@ -73,8 +75,8 @@ export const register = async (req, res) => {
         const hashedPassword = await bcrypt.hash(password, 10);
 
         const user = await User.create({
-            name,
-            email,
+            name: name.trim(),
+            email: normalizedEmail,
             password: hashedPassword
         });
 
@@ -96,12 +98,13 @@ export const register = async (req, res) => {
 export const login = async (req, res) => {
     try {
         const { email, password } = req.body;
+        const normalizedEmail = normalizeEmail(email);
 
-        if (!email || !password) return res.status(400).json({ message: "Email and password are required" });
+        if (!normalizedEmail || !password) return res.status(400).json({ message: "Email and password are required" });
 
         // Find user
         const user = await User.findOne({
-            where: { email }
+            where: { email: normalizedEmail }
         });
 
         if (!user) {
@@ -139,44 +142,6 @@ export const login = async (req, res) => {
             message: "Login failed",
             error: error.message
         });
-    }
-};
-
-export const googleLogin = async (req, res) => {
-    try {
-        const { idToken } = req.body;
-
-        if (!idToken) {
-            return res.status(400).json({ message: "Google credential is required" });
-        }
-
-        const googleProfile = await verifyGoogleIdToken(idToken);
-        let user = await User.findOne({ where: { email: googleProfile.email } });
-
-        if (user) {
-            const updates = {};
-            if (!user.googleId) updates.googleId = googleProfile.googleId;
-            if (!user.name) updates.name = googleProfile.name;
-            if (user.authProvider !== "google") updates.authProvider = user.password ? "local,google" : "google";
-            if (Object.keys(updates).length) user = await user.update(updates);
-        } else {
-            user = await User.create({
-                name: googleProfile.name,
-                email: googleProfile.email,
-                password: null,
-                googleId: googleProfile.googleId,
-                authProvider: "google"
-            });
-        }
-
-        return res.status(200).json({
-            message: "Google login successful",
-            token: signToken(user),
-            user: publicUser(user)
-        });
-    } catch (error) {
-        console.error("Google login error:", error.message);
-        return res.status(401).json({ message: "Google sign-in failed" });
     }
 };
 
@@ -228,6 +193,44 @@ export const forgotPassword = async (req, res) => {
     } catch (error) {
         console.error("Forgot password error:", error);
         return res.status(500).json({ message: "Unable to send OTP email" });
+    }
+};
+
+export const googleLogin = async (req, res) => {
+    try {
+        const { idToken } = req.body;
+
+        if (!idToken) {
+            return res.status(400).json({ message: "Google credential is required" });
+        }
+
+        const googleProfile = await verifyGoogleIdToken(idToken);
+        let user = await User.findOne({ where: { email: googleProfile.email } });
+
+        if (user) {
+            const updates = {};
+            if (!user.googleId) updates.googleId = googleProfile.googleId;
+            if (!user.name) updates.name = googleProfile.name;
+            if (user.authProvider !== "google") updates.authProvider = user.password ? "local,google" : "google";
+            if (Object.keys(updates).length) user = await user.update(updates);
+        } else {
+            user = await User.create({
+                name: googleProfile.name,
+                email: googleProfile.email,
+                password: null,
+                googleId: googleProfile.googleId,
+                authProvider: "google"
+            });
+        }
+
+        return res.status(200).json({
+            message: "Google login successful",
+            token: signToken(user),
+            user: publicUser(user)
+        });
+    } catch (error) {
+        console.error("Google login error:", error.message);
+        return res.status(401).json({ message: "Google sign-in failed" });
     }
 };
 

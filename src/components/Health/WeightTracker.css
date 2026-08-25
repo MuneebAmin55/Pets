@@ -1,0 +1,60 @@
+.weight-tracker {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.weight-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.weight-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.weight-stats {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.weight-stat-box {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 1rem;
+  border-radius: 8px;
+  flex: 1;
+  text-align: center;
+}
+
+.weight-stat-box .label {
+  display: block;
+  font-size: 0.8rem;
+  opacity: 0.7;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.25rem;
+}
+
+.weight-stat-box .value {
+  display: block;
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.weight-stat-box.healthy {
+  border-bottom: 3px solid var(--accent-mint, #88d4b4);
+}
+
+.weight-stat-box.warning {
+  border-bottom: 3px solid var(--accent-peach, #f9c66a);
+}
+
+.chart-container {
+  height: 250px;
+  width: 100%;
+}

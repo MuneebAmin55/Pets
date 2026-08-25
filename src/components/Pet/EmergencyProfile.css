@@ -1,0 +1,84 @@
+.emergency-profile {
+  background: var(--accent-peach, #f9c66a);
+  color: #1a1a1a;
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  box-shadow: 0 4px 12px rgba(249, 198, 106, 0.2);
+}
+
+.emergency-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.emergency-header h3 {
+  margin: 0;
+  font-size: 1.25rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.emergency-header .alert-icon {
+  font-size: 1.5rem;
+}
+
+.qr-code-container {
+  background: white;
+  padding: 0.5rem;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.emergency-info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.info-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.info-group .label {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.7;
+}
+
+.info-group .value {
+  font-weight: 600;
+  font-size: 1.1rem;
+}
+
+.emergency-actions {
+  display: flex;
+  gap: 1rem;
+  margin-top: 0.5rem;
+}
+
+.emergency-actions button {
+  flex: 1;
+  background: #1a1a1a;
+  color: white;
+  border: none;
+  padding: 0.75rem;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.emergency-actions button:hover {
+  opacity: 0.9;
+}

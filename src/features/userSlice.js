@@ -17,19 +17,33 @@ const initialUser = (() => {
   }
 })()
 
-export const loginUser = createAsyncThunk('user/loginUser', async (credentials) => {
-  const { data } = await authApi.login(credentials)
-  return sessionUser(data)
+const authErrorMessage = (error) => error?.response?.data?.message || error?.message || 'Request failed'
+
+export const loginUser = createAsyncThunk('user/loginUser', async (credentials, { rejectWithValue }) => {
+  try {
+    const { data } = await authApi.login(credentials)
+    return sessionUser(data)
+  } catch (error) {
+    return rejectWithValue(authErrorMessage(error))
+  }
 })
 
-export const registerUser = createAsyncThunk('user/registerUser', async (details) => {
-  const { data } = await authApi.register(details)
-  return sessionUser(data)
+export const registerUser = createAsyncThunk('user/registerUser', async (details, { rejectWithValue }) => {
+  try {
+    const { data } = await authApi.register(details)
+    return sessionUser(data)
+  } catch (error) {
+    return rejectWithValue(authErrorMessage(error))
+  }
 })
 
-export const loginWithGoogle = createAsyncThunk('user/loginWithGoogle', async (idToken) => {
-  const { data } = await authApi.google(idToken)
-  return sessionUser(data)
+export const loginWithGoogle = createAsyncThunk('user/loginWithGoogle', async (idToken, { rejectWithValue }) => {
+  try {
+    const { data } = await authApi.google(idToken)
+    return sessionUser(data)
+  } catch (error) {
+    return rejectWithValue(authErrorMessage(error))
+  }
 })
 
 export const requestPasswordReset = createAsyncThunk('user/requestPasswordReset', async (email) => {
@@ -62,7 +76,7 @@ const userSlice = createSlice({
         state.loading = false
         if (action.payload) { state.isAuthenticated = true; state.user = action.payload }
       })
-      .addMatcher((action) => action.type.startsWith('user/') && action.type.endsWith('/rejected'), (state, action) => { state.loading = false; state.error = action.error.message || 'Request failed' })
+      .addMatcher((action) => action.type.startsWith('user/') && action.type.endsWith('/rejected'), (state, action) => { state.loading = false; state.error = action.payload || action.error.message || 'Request failed' })
   },
 })
 

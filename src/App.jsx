@@ -12,6 +12,9 @@ import HealthRecordForm from './components/Health/HealthRecordForm'
 import HealthRecordList from './components/Health/HealthRecordList'
 import HealthTimeline from './components/Health/HealthTimeline'
 import DocumentsPage from './components/Documents/DocumentsPage'
+import EmergencyProfile from './components/Pet/EmergencyProfile'
+import WeightTracker from './components/Health/WeightTracker'
+import { generateHealthReport } from './utils/pdfGenerator'
 import './App.css'
 import './styles/global.css'
 
@@ -331,6 +334,10 @@ function PetPage({
   const petRecords = [...(records[pet.id] || [])].sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0))
   const petReminders = reminders.filter((item) => item.petId === pet.id || item.petName === pet.name)
 
+  const handleDownloadReport = () => {
+    generateHealthReport(pet, petRecords, petReminders)
+  }
+
   return (
     <section className="pet-detail-page">
       <button className="back-button" type="button" onClick={() => navigate('/')}>← Back to my pets</button>
@@ -345,9 +352,13 @@ function PetPage({
         <div className="pet-actions">
           <button className="add-button" type="button" onClick={() => onOpenReminder(pet.id)}>Add reminder</button>
           <button className="add-button" type="button" onClick={() => onOpenRecord(pet.id)}>Add record</button>
+          <button className="add-button" type="button" onClick={handleDownloadReport}>Download Report</button>
           <button className="delete-button" type="button" onClick={() => onRemovePet(pet)}>Delete</button>
         </div>
       </div>
+
+      <EmergencyProfile pet={pet} />
+      <WeightTracker pet={pet} records={petRecords} />
 
       <div className="detail-card">
         <div className="record-heading">
