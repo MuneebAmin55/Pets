@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import './WeightTracker.css'
 
-export default function WeightTracker({ pet, records }) {
+export default function WeightTracker({ pet }) {
   const weightData = useMemo(() => {
     // In a real scenario, weight would be a specific record type or field.
     // Here we'll mock some data points to show the growth chart based on pet info.

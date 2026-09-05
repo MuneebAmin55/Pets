@@ -1,5 +1,5 @@
 import { jsPDF } from 'jspdf'
-import 'jspdf-autotable'
+import { autoTable } from 'jspdf-autotable'
 
 export const generateHealthReport = (pet, records, reminders) => {
   const doc = new jsPDF()
@@ -25,7 +25,7 @@ export const generateHealthReport = (pet, records, reminders) => {
     record.notes || '-'
   ])
 
-  doc.autoTable({
+  autoTable(doc, {
     startY: 52,
     head: [['Date', 'Type', 'Title', 'Vet', 'Notes']],
     body: recordsBody.length ? recordsBody : [['No records found', '', '', '', '']],
@@ -34,7 +34,7 @@ export const generateHealthReport = (pet, records, reminders) => {
   })
 
   // Upcoming Reminders Table
-  const finalY = doc.lastAutoTable.finalY || 52
+  const finalY = doc.lastAutoTable?.finalY || 52
   doc.setFontSize(14)
   doc.text('Upcoming Reminders', 14, finalY + 14)
   
@@ -44,7 +44,7 @@ export const generateHealthReport = (pet, records, reminders) => {
     rem.type ? rem.type.charAt(0).toUpperCase() + rem.type.slice(1) : ''
   ])
 
-  doc.autoTable({
+  autoTable(doc, {
     startY: finalY + 18,
     head: [['Due Date', 'Task', 'Type']],
     body: remindersBody.length ? remindersBody : [['No upcoming reminders', '', '']],

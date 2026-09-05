@@ -46,8 +46,13 @@ export const loginWithGoogle = createAsyncThunk('user/loginWithGoogle', async (i
   }
 })
 
-export const requestPasswordReset = createAsyncThunk('user/requestPasswordReset', async (email) => {
-  await authApi.requestPasswordReset(email)
+export const requestPasswordReset = createAsyncThunk('user/requestPasswordReset', async (email, { rejectWithValue }) => {
+  try {
+    const { data } = await authApi.requestPasswordReset(email)
+    return data
+  } catch (error) {
+    return rejectWithValue(authErrorMessage(error))
+  }
 })
 
 export const verifyPasswordResetOtp = createAsyncThunk('user/verifyPasswordResetOtp', async (payload) => {

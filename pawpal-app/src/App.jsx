@@ -32,6 +32,11 @@ const petIcon = (species) => (species === 'Cat' ? '🐈' : species === 'Bird' ? 
 
 const computeCompletedCount = (list) => list.filter((item) => item.completed).length
 
+const getRequestErrorMessage = (error, fallback) => {
+  if (typeof error === 'string') return error
+  return error?.response?.data?.message || error?.message || fallback
+}
+
 const isUuid = (value) =>
   typeof value === 'string' &&
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
@@ -140,9 +145,9 @@ function ResetPasswordPage() {
       setResetToken('')
       setForm((current) => ({ ...current, otp: '', password: '', confirmPassword: '' }))
       setStage('verify')
-      setNotice('OTP sent to your email.')
+      setNotice('If an account exists for this email, an OTP has been sent. Check your inbox and spam folder.')
     } catch (requestError) {
-      setError(requestError?.response?.data?.message || requestError?.message || 'Unable to send OTP.')
+      setError(requestError?.response?.data?.message || requestError?.message || requestError || 'Unable to send OTP.')
     } finally {
       setBusy(false)
     }
@@ -165,7 +170,7 @@ function ResetPasswordPage() {
       setStage('reset')
       setNotice('OTP verified. Set your new password.')
     } catch (requestError) {
-      setError(requestError?.response?.data?.message || requestError?.message || 'Unable to verify OTP.')
+      setError(requestError?.response?.data?.message || requestError?.message || requestError || 'Unable to verify OTP.')
     } finally {
       setBusy(false)
     }
@@ -192,7 +197,7 @@ function ResetPasswordPage() {
       setStage('done')
       setNotice('Your password has been reset. You can sign in now.')
     } catch (requestError) {
-      setError(requestError?.response?.data?.message || requestError?.message || 'Unable to reset password.')
+      setError(requestError?.response?.data?.message || requestError?.message || requestError || 'Unable to reset password.')
     } finally {
       setBusy(false)
     }
@@ -470,7 +475,7 @@ function App() {
               setAuthForm({ name: '', email: '', password: '' })
               setNotice('Welcome back to PawPal!')
             } catch (error) {
-              setAuthError(error?.response?.data?.message || error?.message || 'Google sign-in failed. Please try again.')
+              setAuthError(getRequestErrorMessage(error, 'Google sign-in failed. Please try again.'))
             }
           },
         })
@@ -712,8 +717,7 @@ function App() {
 
     try {
       if (authMode === 'reset') {
-        await dispatch(requestPasswordReset(authForm.email)).unwrap()
-        setNotice('Check your inbox for the reset token and link.')
+        navigate('/reset-password')
       } else if (authMode === 'signup') {
         await dispatch(registerUser({ name: authForm.name.trim(), email: authForm.email, password: authForm.password })).unwrap()
         setNotice('Your PawPal account is ready.')
@@ -724,7 +728,7 @@ function App() {
 
       setAuthForm({ name: '', email: '', password: '' })
     } catch (error) {
-      setAuthError(error?.response?.data?.message || error?.message || 'Could not complete authentication. Please try again.')
+      setAuthError(getRequestErrorMessage(error, 'Could not complete authentication. Please try again.'))
     }
   }
 

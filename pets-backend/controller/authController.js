@@ -148,12 +148,13 @@ export const login = async (req, res) => {
 export const forgotPassword = async (req, res) => {
     try {
         const { email } = req.body;
+        const normalizedEmail = normalizeEmail(email);
 
-        if (!email) {
+        if (!normalizedEmail) {
             return res.status(400).json({ message: "Email is required" });
         }
 
-        const user = await User.findOne({ where: { email } });
+        const user = await User.findOne({ where: { email: normalizedEmail } });
 
         // Keep the response the same so this endpoint does not reveal accounts.
         if (!user) {
@@ -192,7 +193,7 @@ export const forgotPassword = async (req, res) => {
         return res.status(200).json({ message: "OTP sent to your email" });
     } catch (error) {
         console.error("Forgot password error:", error);
-        return res.status(500).json({ message: "Unable to send OTP email" });
+        return res.status(503).json({ message: "Email service is unavailable. Check the configured email credentials." });
     }
 };
 
@@ -237,8 +238,9 @@ export const googleLogin = async (req, res) => {
 export const verifyOtp = async (req, res) => {
     try {
         const { email, otp } = req.body;
+        const normalizedEmail = normalizeEmail(email);
 
-        if (!email || !otp) {
+        if (!normalizedEmail || !otp) {
             return res.status(400).json({ message: "Email and OTP are required" });
         }
 
@@ -248,7 +250,7 @@ export const verifyOtp = async (req, res) => {
             .digest("hex");
 
         const user = await User.findOne({
-            where: { email, passwordResetOtp }
+            where: { email: normalizedEmail, passwordResetOtp }
         });
 
         if (!user || !user.passwordResetOtpExpires || user.passwordResetOtpExpires < new Date()) {
