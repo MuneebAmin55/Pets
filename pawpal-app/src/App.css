@@ -959,6 +959,7 @@ h3 {
 .auth-submit {
   width: 100%;
   margin-top: 1rem;
+  min-height: 3.25rem;
 }
 
 .auth-submit:disabled {
@@ -1013,6 +1014,10 @@ h3 {
   background: transparent;
   color: var(--primary);
   font-weight: 700;
+}
+
+.auth-card {
+  text-align: left;
 }
 
 .documents-page {
@@ -1219,6 +1224,34 @@ h3 {
 }
 
 @media (max-width: 560px) {
+  .pawpal-shell {
+    padding: 0.85rem 0.85rem 2.5rem;
+  }
+
+  .signed-out {
+    margin: 2rem auto;
+    padding: 1.25rem;
+    border-radius: 1.25rem;
+  }
+
+  .signed-out > span {
+    width: 52px;
+    height: 52px;
+    margin-bottom: 1rem;
+    font-size: 1.45rem;
+  }
+
+  .signed-out h1 {
+    font-size: 1.9rem;
+    line-height: 1.15;
+  }
+
+  .signed-out > p:not(.eyebrow) {
+    margin: 0.85rem auto 1.25rem;
+    font-size: 0.98rem;
+    line-height: 1.55;
+  }
+
   .nav-links {
     width: 100%;
     overflow-x: auto;
@@ -1249,5 +1282,54 @@ h3 {
 
   .modal-card {
     width: 100%;
+  }
+
+  .auth-card {
+    padding: 1.25rem;
+    border-radius: 1.15rem;
+  }
+
+  .auth-card label {
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    font-size: 1rem;
+  }
+
+  .auth-card input,
+  .auth-card select,
+  .auth-card textarea {
+    min-height: 3.35rem;
+    padding: 0.95rem 1rem;
+    border-radius: 0.95rem;
+    font-size: 1rem;
+    line-height: 1.35;
+  }
+
+  .auth-submit {
+    min-height: 3.4rem;
+    margin-top: 1.15rem;
+    padding: 0.95rem 1rem;
+    font-size: 1rem;
+  }
+
+  .google-auth-button {
+    width: 100%;
+    min-height: 48px;
+  }
+
+  .auth-switch {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 0.35rem 0.5rem;
+    font-size: 1rem;
+    line-height: 1.5;
+  }
+
+  .auth-error,
+  .auth-success,
+  .auth-help {
+    font-size: 0.98rem;
+    line-height: 1.45;
   }
 }
